@@ -1,0 +1,41 @@
+type User @table {
+  username: String!
+  email: String!
+  level: Int!
+  totalXP: Int64!
+  avatarUrl: String
+  bio: String
+}
+
+type Post @table {
+  author: User!
+  contentText: String!
+  createdAt: Timestamp!
+  imageUrl: String
+}
+
+type Quest @table {
+  post: Post!
+  title: String!
+  description: String!
+  xpReward: Int!
+  difficultyLevel: Int
+}
+
+type Achievement @table {
+  user: User!
+  badgeName: String!
+  earnedAt: Timestamp!
+}
+
+type Follow @table(key: ["follower", "followed"]) {
+  follower: User!
+  followed: User!
+  createdAt: Timestamp!
+}
+
+type Interaction @table {
+  user: User!
+  post: Post!
+  interactionType: String!
+}

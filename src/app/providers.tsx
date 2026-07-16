@@ -1,6 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { queryClient } from "@/app/queryClient";
+import { AuthProvider } from "@/app/auth-provider";
 import { useThemeSync } from "@/hooks/use-theme-sync";
 import type { PropsWithChildren } from "react";
 
@@ -12,10 +13,12 @@ function ThemeBridge({ children }: PropsWithChildren) {
 export function AppProviders({ children }: PropsWithChildren) {
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeBridge>
-        {children}
-        <Toaster richColors position="top-right" />
-      </ThemeBridge>
+      <AuthProvider>
+        <ThemeBridge>
+          {children}
+          <Toaster richColors position="top-right" />
+        </ThemeBridge>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

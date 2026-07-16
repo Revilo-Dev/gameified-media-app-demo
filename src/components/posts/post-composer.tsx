@@ -3,10 +3,12 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/common/card";
 import { Button } from "@/components/common/button";
 import { Avatar } from "@/components/common/avatar";
-import { users } from "@/lib/demo-data";
+import { useAuth } from "@/app/auth-provider";
+import { createPost } from "@/firebase/posts";
 
 const postSchema = z.object({
   content: z.string().trim().min(1).max(300),
@@ -15,6 +17,8 @@ const postSchema = z.object({
 type PostFormValues = z.infer<typeof postSchema>;
 
 export function PostComposer() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const {
     register,
     watch,
@@ -32,14 +36,28 @@ export function PostComposer() {
     <Card className="p-5">
       <form
         onSubmit={handleSubmit(async (values) => {
-          await Promise.resolve();
-          toast.success("+5 XP", { description: `Posted "${values.content.slice(0, 40)}${values.content.length > 40 ? "..." : ""}"` });
+          if (!user) {
+            navigate("/login");
+            return;
+          }
+
+          await createPost({
+            authorId: user.uid,
+            content: values.content.trim(),
+            imageURL: null,
+            parentPostId: null,
+            repostedPostId: null,
+            quotedPostId: null,
+            tags: [],
+            visibility: "public",
+          });
+          toast.success("Post published", { description: `Posted "${values.content.slice(0, 40)}${values.content.length > 40 ? "..." : ""}"` });
           reset();
         })}
         className="space-y-4"
       >
         <div className="flex gap-4">
-          <Avatar name={users[0].displayName} />
+          <Avatar name={user?.displayName ?? "Guest"} />
           <textarea
             {...register("content")}
             placeholder="Share a pulse with your crew..."
@@ -49,7 +67,7 @@ export function PostComposer() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3 text-sm text-textMuted">
             <ImagePlus size={18} />
-            <span>One image, audience controls, and XP-safe posting hook ready for Firebase.</span>
+            <span>Posts are saved to Firestore and require a signed-in user.</span>
           </div>
           <span className="text-sm text-textMuted">{content.length}/300</span>
         </div>

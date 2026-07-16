@@ -1,4 +1,4 @@
-export type ThemeMode = "light" | "dark" | "oled";
+export type ThemeMode = "light" | "dark";
 
 export type BadgeRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
 
@@ -54,6 +54,7 @@ export interface Post {
   replyCount: number;
   repostCount: number;
   bookmarkCount: number;
+  reactionTypeCounts?: Partial<Record<ReactionType, number>>;
   tags: string[];
   visibility: "public" | "followers";
   createdAt: string;

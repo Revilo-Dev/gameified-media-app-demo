@@ -13,21 +13,12 @@
 }
 
 [data-theme="dark"] {
-  --canvas: #13151a;
-  --surface: #1b1f27;
-  --surface-alt: #252b35;
-  --text: #f7f7f5;
-  --text-muted: #a3a9b8;
-  --border: rgba(247, 247, 245, 0.12);
-}
-
-[data-theme="oled"] {
   --canvas: #000000;
   --surface: #050505;
   --surface-alt: #111111;
-  --text: #ffffff;
-  --text-muted: #b4b4b8;
-  --border: rgba(255, 255, 255, 0.12);
+  --text: #f7f7f5;
+  --text-muted: #a3a9b8;
+  --border: rgba(247, 247, 245, 0.12);
 }
 
 body {

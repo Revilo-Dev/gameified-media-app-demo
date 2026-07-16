@@ -18,7 +18,9 @@ service cloud.firestore {
     }
 
     match /bookmarks/{bookmarkId} {
-      allow read, write: if isSignedIn() && request.auth.uid == resource.data.userId;
+      allow read: if isSignedIn() && request.auth.uid == resource.data.userId;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
   }
 }

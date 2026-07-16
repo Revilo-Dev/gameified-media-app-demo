@@ -10,7 +10,7 @@ export function useThemeSync() {
   useEffect(() => {
     const storedTheme = window.localStorage.getItem(STORAGE_KEY);
     const storedAccent = window.localStorage.getItem(ACCENT_KEY);
-    if (storedTheme === "light" || storedTheme === "dark" || storedTheme === "oled") {
+    if (storedTheme === "light" || storedTheme === "dark") {
       setTheme(storedTheme);
     }
     if (storedAccent) {

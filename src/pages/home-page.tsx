@@ -19,18 +19,18 @@ export function HomePage() {
 
   return (
     <div className="space-y-5">
-      <Card className="sticky top-0 z-10 border border-border/80 bg-canvas/90 p-3 backdrop-blur">
-        <div className="flex items-center justify-between">
+      <Card className="sticky top-0 z-10 border-0 bg-canvas/85 p-3 shadow-none backdrop-blur md:border md:border-border/60 md:shadow-panel">
+        <div className="flex items-center justify-between gap-3">
           <h1 className="text-lg font-semibold">Home</h1>
-          <div className="rounded-full bg-surfaceAlt p-1">
+          <div className="flex items-center rounded-full bg-surfaceAlt/90 p-1 shadow-sm">
             <button
-              className={`rounded-full px-4 py-2 text-sm ${timelineTab === "for-you" ? "bg-accent text-white" : ""}`}
+              className={`rounded-full px-4 py-2 text-sm transition ${timelineTab === "for-you" ? "bg-[color:var(--accent)] text-white shadow-sm" : "text-textMuted"}`}
               onClick={() => setTimelineTab("for-you")}
             >
               For You
             </button>
             <button
-              className={`rounded-full px-4 py-2 text-sm ${timelineTab === "following" ? "bg-accent text-white" : ""}`}
+              className={`rounded-full px-4 py-2 text-sm transition ${timelineTab === "following" ? "bg-[color:var(--accent)] text-white shadow-sm" : "text-textMuted"}`}
               onClick={() => setTimelineTab("following")}
             >
               Following

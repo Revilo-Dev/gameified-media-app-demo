@@ -12,15 +12,18 @@ import { conversations, notifications, shopItems, triviaQuestions, users } from 
 import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/auth";
 import { useAuth } from "@/app/auth-provider";
 import { ensureUserProfile } from "@/firebase/users";
-import { firebaseConfig } from "@/firebase/config";
 import { createPost, subscribeToPosts } from "@/firebase/posts";
 import type { Post } from "@/types/models";
-import { MessageCircle } from "lucide-react";
+import { Crown, MessageCircle, Palette } from "lucide-react";
 import { doc, increment, updateDoc } from "firebase/firestore";
 import { db } from "@/firebase/config";
 import { auth } from "@/firebase/config";
 import { linkGoogleAccount, changeUserPassword, updateDisplayName, uploadProfilePicture } from "@/firebase/auth";
 import { Avatar } from "@/components/common/avatar";
+import { setFollowingRelationship, subscribeToFollowCounts, subscribeToFollowRelationship } from "@/firebase/follows";
+import { addGemsToUser, addXpToUser, subscribeToXpLeaderboard } from "@/firebase/users";
+import { useUiStore } from "@/store/use-ui-store";
+import { getXpProgress } from "@/constants/gamification";
 
 function getFirebaseErrorMessage(error: unknown) {
   if (typeof error !== "object" || error === null) {
@@ -70,9 +73,29 @@ export function ExplorePage() {
 export function ProfilePage() {
   const { handle } = useParams();
   const currentUserHandle = auth.currentUser?.email?.split("@")[0] ?? "";
+  const currentUserId = auth.currentUser?.uid ?? "";
   const user = users.find((profile) => profile.handle === handle) ?? users[0];
   const isOwnProfile = handle === currentUserHandle || (!handle && currentUserHandle === user.handle);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [followCounts, setFollowCounts] = useState({ followers: user.followerCount, following: user.followingCount });
+  const [isFollowing, setIsFollowing] = useState(false);
+
+  useEffect(() => {
+    setFollowCounts({ followers: user.followerCount, following: user.followingCount });
+
+    if (!currentUserId || user.uid === currentUserId) {
+      return;
+    }
+
+    const unsubscribeCounts = subscribeToFollowCounts(user.uid, setFollowCounts);
+    const unsubscribeRelationship = subscribeToFollowRelationship(currentUserId, user.uid, setIsFollowing);
+
+    return () => {
+      unsubscribeCounts();
+      unsubscribeRelationship();
+    };
+  }, [currentUserId, user.followingCount, user.followerCount, user.uid]);
+
   return (
     <PageFrame title={user.displayName} subtitle={user.bio}>
       <Card className="space-y-5 p-6">
@@ -84,10 +107,10 @@ export function ProfilePage() {
             <div className="mt-4 grid gap-3 md:grid-cols-[auto_minmax(0,1fr)] md:items-center">
               <div className="flex flex-wrap gap-3 text-sm">
                 <span className="rounded-2xl border border-border px-3 py-2">
-                  <strong>{user.followerCount}</strong> Followers
+                  <strong>{followCounts.followers}</strong> Followers
                 </span>
                 <span className="rounded-2xl border border-border px-3 py-2">
-                  <strong>{user.followingCount}</strong> Following
+                  <strong>{followCounts.following}</strong> Following
                 </span>
               </div>
               <XpProgress xp={user.xp} level={user.level} />
@@ -100,10 +123,15 @@ export function ProfilePage() {
             onClick={() => {
               if (isOwnProfile) {
                 setIsEditorOpen(true);
+                return;
               }
+              if (!currentUserId) {
+                return;
+              }
+              void setFollowingRelationship(currentUserId, user.uid, !isFollowing);
             }}
           >
-            {isOwnProfile ? "Edit profile" : "Follow"}
+            {isOwnProfile ? "Edit profile" : isFollowing ? "Unfollow" : "Follow"}
           </Button>
         </div>
         <div className="grid grid-cols-3 gap-3 text-sm">
@@ -127,39 +155,95 @@ export function ProfilePage() {
 }
 
 export function SettingsPage() {
-  return <PageFrame title="Settings" subtitle="Account, privacy, notifications, appearance, and connected accounts are laid out here for the demo." />;
+  const { theme, accentColor, textScale, setTheme, setAccentColor, setTextScale } = useUiStore();
+
+  const accentPresets = [
+    { label: "Purple", value: "#8b5cf6" },
+    { label: "Orange", value: "#ff8a3d" },
+    { label: "Dark Blue", value: "#123b8f" },
+    { label: "Aqua", value: "#20c7c6" },
+    { label: "Red", value: "#ef4444" },
+  ] as const;
+
+  return (
+    <PageFrame title="Settings" subtitle="Appearance and account options live here.">
+      <div className="space-y-5">
+        <Card className="space-y-4 p-6">
+          <div className="flex items-center gap-2">
+            <Palette size={18} />
+            <h2 className="text-lg font-semibold">Appearance</h2>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button variant={theme === "dark" ? "primary" : "secondary"} onClick={() => setTheme("dark")}>
+              Dark mode
+            </Button>
+            <Button variant={theme === "light" ? "primary" : "secondary"} onClick={() => setTheme("light")}>
+              Light mode
+            </Button>
+          </div>
+          <div className="space-y-2">
+            <p className="text-sm font-semibold">Theme color</p>
+            <div className="flex flex-wrap gap-2">
+              {accentPresets.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  aria-label={preset.label}
+                  title={preset.label}
+                  onClick={() => setAccentColor(preset.value)}
+                  className={`h-11 w-11 rounded-full border-2 transition ${
+                    accentColor === preset.value ? "scale-110 border-text" : "border-transparent"
+                  }`}
+                  style={{ backgroundColor: preset.value }}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold">Text scale</p>
+              <span className="text-sm text-textMuted">{Math.round(textScale * 100)}%</span>
+            </div>
+            <input
+              type="range"
+              min="0.9"
+              max="1.15"
+              step="0.05"
+              value={textScale}
+              onChange={(event) => setTextScale(Number(event.target.value))}
+              className="w-full accent-[color:var(--accent)]"
+            />
+          </div>
+        </Card>
+
+        <Card className="space-y-4 p-6">
+          <h2 className="text-lg font-semibold">Account</h2>
+          <p className="text-sm text-textMuted">Profile and connection tools stay in the main profile flow.</p>
+          <div className="flex flex-wrap gap-3">
+            <Button variant="secondary">Manage profile</Button>
+            <Button variant="secondary">Privacy</Button>
+            <Button variant="secondary">Notifications</Button>
+          </div>
+        </Card>
+      </div>
+    </PageFrame>
+  );
 }
 
 function AuthShell({
   title,
-  subtitle,
   children,
 }: {
   title: string;
-  subtitle: string;
   children: ReactNode;
 }) {
   return (
     <div className="mx-auto grid min-h-screen max-w-5xl place-items-center px-4 py-10">
       <Card className="w-full max-w-lg space-y-6 p-6">
-        <div>
-          <h1 className="text-3xl font-bold">{title}</h1>
-          <p className="mt-2 text-sm text-textMuted">{subtitle}</p>
-        </div>
+        <h1 className="text-3xl font-bold">{title}</h1>
         {children}
       </Card>
     </div>
-  );
-}
-
-function AuthDiagnostics() {
-  return (
-    <Card className="space-y-2 border-dashed p-4 text-xs text-textMuted">
-      <p className="font-semibold text-text">Auth diagnostics</p>
-      <p>Project: {firebaseConfig.projectId || "missing"}</p>
-      <p>Auth domain: {firebaseConfig.authDomain || "missing"}</p>
-      <p>API key: {firebaseConfig.apiKey ? "present" : "missing"}</p>
-    </Card>
   );
 }
 
@@ -320,8 +404,7 @@ export function LoginPage() {
   }, [navigate, user]);
 
   return (
-    <AuthShell title="Login" subtitle="Sign in with email/password or Google. Your profile doc is created automatically after first login.">
-      <AuthDiagnostics />
+    <AuthShell title="Login">
       <form
         className="space-y-4"
         onSubmit={form.handleSubmit(async (values) => {
@@ -385,8 +468,7 @@ export function SignupPage() {
   }, [navigate, user]);
 
   return (
-    <AuthShell title="Sign Up" subtitle="Create your account with email/password or Google. The user document is created for you.">
-      <AuthDiagnostics />
+    <AuthShell title="Sign Up">
       <form
         className="space-y-4"
         onSubmit={form.handleSubmit(async (values) => {
@@ -501,6 +583,7 @@ export function PostPage() {
                     visibility: "public",
                   });
                   await updateDoc(doc(db, "posts", post.id), { replyCount: increment(1) });
+                  await addXpToUser(user.uid, 2);
                   setReplyText("");
                 }}
               >
@@ -550,18 +633,46 @@ export function BookmarksPage() {
 
 export function ArcadePage() {
   const question = triviaQuestions[0];
+  const { user } = useAuth();
+  const [claimedToday, setClaimedToday] = useState(false);
+  const rewardKey = "pulsearc-daily-gems";
+
+  useEffect(() => {
+    setClaimedToday(window.localStorage.getItem(rewardKey) === new Date().toDateString());
+  }, []);
+
   return (
     <PageFrame title="Arcade" subtitle="Daily trivia, one reward claim per day, and badge progress fit into a lightweight game layer.">
-      <Card className="p-6">
-        <p className="font-semibold">{question.prompt}</p>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {question.choices.map((choice) => (
-            <div key={choice} className="rounded-2xl border border-border p-4 text-sm">
-              {choice}
-            </div>
-          ))}
-        </div>
-      </Card>
+      <div className="space-y-5">
+        <Card className="space-y-4 p-6">
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-semibold">{question.prompt}</p>
+            <Button
+              variant={claimedToday ? "secondary" : "primary"}
+              disabled={claimedToday}
+              onClick={async () => {
+                if (!user) {
+                  return;
+                }
+
+                await addGemsToUser(user.uid, 10);
+                window.localStorage.setItem(rewardKey, new Date().toDateString());
+                setClaimedToday(true);
+                toast.success("Daily gems claimed", { description: "+10 gems added to your account" });
+              }}
+            >
+              {claimedToday ? "Claimed" : "+10 Gems"}
+            </Button>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {question.choices.map((choice) => (
+              <div key={choice} className="rounded-2xl border border-border p-4 text-sm">
+                {choice}
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
     </PageFrame>
   );
 }
@@ -587,19 +698,38 @@ export function ShopPage() {
 }
 
 export function LeaderboardPage() {
+  const [leaders, setLeaders] = useState(users);
+
+  useEffect(() => subscribeToXpLeaderboard(setLeaders), []);
+
   return (
     <PageFrame title="Leaderboard" subtitle="Global, weekly, XP, level, arcade, and badge leaderboards are ready for live data bindings.">
       <Card className="space-y-3 p-6">
-        {users.map((user, index) => (
-          <div key={user.uid} className="flex items-center justify-between rounded-2xl border border-border p-4">
-            <span>
-              #{index + 1} {user.displayName}
-            </span>
-            <span className="text-sm text-textMuted">
-              Level {user.level} • {user.xp} XP
-            </span>
-          </div>
-        ))}
+        {leaders.map((leader, index) => {
+          const progress = getXpProgress(leader.xp, leader.level);
+
+          return (
+            <div key={leader.uid} className="flex items-center justify-between gap-4 rounded-2xl border border-border p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[color:var(--accent)]/15 text-sm font-bold text-[color:var(--accent)]">
+                  {index + 1}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    {index === 0 ? <Crown size={16} className="text-[color:var(--accent)]" /> : null}
+                    <span className="font-semibold">{leader.displayName}</span>
+                  </div>
+                  <p className="text-sm text-textMuted">@{leader.handle}</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-sm font-semibold">Level {leader.level}</p>
+                <p className="text-sm text-textMuted">{leader.xp} XP</p>
+                <p className="text-xs text-textMuted">{progress.earned}/{progress.needed} to next level</p>
+              </div>
+            </div>
+          );
+        })}
       </Card>
     </PageFrame>
   );

@@ -1,39 +1,68 @@
-import { Bell, Bookmark, Gamepad2, Home, Info, MessageSquare, Settings, ShoppingBag, Store, Trophy } from "lucide-react";
+import {
+  Bell,
+  Bookmark,
+  Home,
+  Info,
+  MessageSquare,
+  Settings,
+  Trophy,
+} from "lucide-react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { doc, onSnapshot } from "firebase/firestore";
 import { Avatar } from "@/components/common/avatar";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { users } from "@/lib/demo-data";
-import { useUiStore } from "@/store/use-ui-store";
-import type { ThemeMode } from "@/types/models";
 import { useAuth } from "@/app/auth-provider";
 import { logout } from "@/firebase/auth";
 import { XpProgress } from "@/components/gamification/xp-progress";
+import { subscribeToFollowCounts } from "@/firebase/follows";
+import { COLLECTIONS } from "@/firebase/firestore";
+import { db } from "@/firebase/config";
+import type { UserProfile } from "@/types/models";
 
 const navItems = [
   { to: "/", label: "Home", icon: Home },
   { to: "/explore", label: "Explore", icon: Info },
   { to: "/chat", label: "Chat", icon: MessageSquare },
   { to: "/notifications", label: "Notifications", icon: Bell },
-  { to: "/arcade", label: "Arcade", icon: Gamepad2 },
-  { to: "/market", label: "Market", icon: Store },
-  { to: "/shop", label: "Shop", icon: ShoppingBag },
   { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
-  { to: "/about", label: "About", icon: Info },
 ];
 
-const themeModes: ThemeMode[] = ["light", "dark"];
-
 export function AppLayout() {
-  const profile = users[0];
-  const { theme, setTheme } = useUiStore();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [profile, setProfile] = useState<UserProfile>(users[0]);
+  const [followCounts, setFollowCounts] = useState({ followers: users[0].followerCount, following: users[0].followingCount });
   const profileHandle = user?.email?.split("@")[0] ?? profile.handle;
   const profilePath = `/profile/${profileHandle}`;
 
+  useEffect(() => {
+    if (!user) {
+      setProfile(users[0]);
+      return;
+    }
+
+    const ref = doc(db, COLLECTIONS.users, user.uid);
+    return onSnapshot(ref, (snapshot) => {
+      if (snapshot.exists()) {
+        setProfile({ ...users[0], ...snapshot.data(), uid: user.uid } as UserProfile);
+      }
+    });
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setFollowCounts({ followers: profile.followerCount, following: profile.followingCount });
+      return;
+    }
+
+    return subscribeToFollowCounts(user.uid, setFollowCounts);
+  }, [profile.followerCount, profile.followingCount, user]);
+
   return (
-    <div className="mx-auto grid min-h-screen max-w-7xl gap-6 px-4 py-6 lg:grid-cols-[280px_minmax(0,1fr)_280px]">
+    <div className="mx-auto min-h-screen max-w-7xl px-3 pb-24 pt-3 sm:px-4 sm:pb-6 lg:grid lg:grid-cols-[280px_minmax(0,1fr)_280px] lg:gap-6">
       <aside className="sticky top-6 hidden self-start lg:block">
         <Card className="space-y-4 p-5">
           <Link to={profilePath} className="flex items-center gap-4 transition hover:opacity-80">
@@ -46,27 +75,24 @@ export function AppLayout() {
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div className="rounded-2xl border border-border p-3">
               <p className="text-textMuted">Followers</p>
-              <p className="mt-1 font-semibold">{profile.followerCount}</p>
+              <p className="mt-1 font-semibold">{followCounts.followers}</p>
             </div>
             <div className="rounded-2xl border border-border p-3">
               <p className="text-textMuted">Following</p>
-              <p className="mt-1 font-semibold">{profile.followingCount}</p>
+              <p className="mt-1 font-semibold">{followCounts.following}</p>
             </div>
           </div>
           <XpProgress xp={profile.xp} level={profile.level} />
+          <div className="rounded-2xl border border-border bg-surface px-4 py-3">
+            <p className="text-textMuted">Gems</p>
+            <p className="mt-1 text-xl font-bold">{profile.gems}</p>
+          </div>
           <NavLink
             to={profilePath}
             className="flex items-center justify-center rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold"
           >
             Edit profile
           </NavLink>
-          <div className="flex flex-wrap gap-2">
-            {themeModes.map((mode) => (
-              <Button key={mode} variant={theme === mode ? "primary" : "secondary"} onClick={() => setTheme(mode)}>
-                {mode}
-              </Button>
-            ))}
-          </div>
           <NavLink to="/bookmarks" className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm">
             <Bookmark size={16} /> Bookmarks
           </NavLink>
@@ -86,7 +112,7 @@ export function AppLayout() {
         </Card>
       </aside>
 
-      <main className="min-w-0">
+      <main className="min-w-0 pb-6 lg:pb-0">
         <Outlet />
       </main>
 
@@ -107,6 +133,25 @@ export function AppLayout() {
           ))}
         </Card>
       </aside>
+
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-canvas/95 px-3 py-2 backdrop-blur lg:hidden">
+        <div className="mx-auto grid max-w-md grid-cols-5 gap-2">
+          {navItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-medium transition ${
+                  isActive ? "bg-[color:var(--accent)] text-white shadow-lg" : "text-textMuted"
+                }`
+              }
+            >
+              <item.icon size={18} />
+              {item.label}
+            </NavLink>
+          ))}
+        </div>
+      </nav>
     </div>
   );
 }

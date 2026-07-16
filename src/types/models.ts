@@ -35,6 +35,7 @@ export interface UserProfile {
   onboardingComplete: boolean;
   theme: ThemeMode;
   accentColor: string;
+  gems: number;
   followerCount: number;
   followingCount: number;
   postCount: number;

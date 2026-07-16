@@ -3,7 +3,8 @@
 @tailwind utilities;
 
 :root {
-  --accent: #ff6b57;
+  --accent: #8b5cf6;
+  --text-scale: 1;
   --canvas: #f4f1ea;
   --surface: rgba(255, 255, 255, 0.9);
   --surface-alt: #ece7dd;
@@ -24,6 +25,14 @@
 body {
   @apply bg-canvas text-text antialiased;
   margin: 0;
+  font-size: calc(16px * var(--text-scale));
+  background-image:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 20%, transparent), transparent 34%),
+    radial-gradient(circle at top right, rgba(251, 146, 60, 0.18), transparent 28%),
+    radial-gradient(circle at 20% 80%, rgba(34, 211, 238, 0.16), transparent 24%),
+    radial-gradient(circle at 80% 78%, rgba(239, 68, 68, 0.15), transparent 20%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 28%);
+  background-attachment: fixed;
 }
 
 * {

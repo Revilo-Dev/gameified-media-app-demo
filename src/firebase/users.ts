@@ -1,7 +1,8 @@
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import { collection, doc, getDoc, limit, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, type Unsubscribe } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import { db } from "@/firebase/config";
 import { COLLECTIONS } from "@/firebase/firestore";
+import { xpRequiredForLevel } from "@/constants/gamification";
 import type { ThemeMode, UserProfile } from "@/types/models";
 
 function buildHandle(displayName: string, uid: string) {
@@ -38,6 +39,7 @@ export async function ensureUserProfile(user: User) {
     onboardingComplete: false,
     theme: "dark" as ThemeMode,
     accentColor: "#ff6b57",
+    gems: 0,
     followerCount: 0,
     followingCount: 0,
     postCount: 0,
@@ -59,5 +61,69 @@ export async function updateUserProfile(userId: string, updates: Partial<UserPro
   await updateDoc(ref, {
     ...updates,
     updatedAt: serverTimestamp(),
+  });
+}
+
+function getLevelForXp(xp: number) {
+  let level = 1;
+
+  while (xp >= xpRequiredForLevel(level + 1)) {
+    level += 1;
+  }
+
+  return level;
+}
+
+export async function addXpToUser(userId: string, xpDelta: number) {
+  const ref = doc(db, COLLECTIONS.users, userId);
+
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+
+    if (!snapshot.exists()) {
+      return;
+    }
+
+    const currentXp = Number(snapshot.data().xp ?? 0);
+    const nextXp = Math.max(0, currentXp + xpDelta);
+
+    transaction.update(ref, {
+      xp: nextXp,
+      level: getLevelForXp(nextXp),
+      updatedAt: serverTimestamp(),
+    });
+  });
+}
+
+export async function addGemsToUser(userId: string, gemDelta: number) {
+  const ref = doc(db, COLLECTIONS.users, userId);
+
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+
+    if (!snapshot.exists()) {
+      return;
+    }
+
+    const currentGems = Number(snapshot.data().gems ?? 0);
+    const nextGems = Math.max(0, currentGems + gemDelta);
+
+    transaction.update(ref, {
+      gems: nextGems,
+      updatedAt: serverTimestamp(),
+    });
+  });
+}
+
+export function subscribeToXpLeaderboard(onChange: (users: UserProfile[]) => void): Unsubscribe {
+  const leaderboardQuery = query(collection(db, COLLECTIONS.users), orderBy("xp", "desc"), orderBy("level", "desc"), limit(20));
+
+  return onSnapshot(leaderboardQuery, (snapshot) => {
+    onChange(
+      snapshot.docs.map((document) => ({
+        ...(document.data() as UserProfile),
+        uid: document.id,
+      })),
+    );
   });
 }

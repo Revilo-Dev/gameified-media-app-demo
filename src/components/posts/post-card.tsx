@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { formatDistanceToNow } from "date-fns";
-import { Flame, Laugh, Lightbulb, MessageCircle, Repeat2, Sparkles, ThumbsUp } from "lucide-react";
+import { Flame, Laugh, Lightbulb, MessageCircle, Repeat2, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { users } from "@/lib/demo-data";
@@ -10,10 +10,12 @@ import { Card } from "@/components/common/card";
 import { Button } from "@/components/common/button";
 import { doc, updateDoc, increment } from "firebase/firestore";
 import { db } from "@/firebase/config";
+import { addGemsToUser, addXpToUser } from "@/firebase/users";
+import { useAuth } from "@/app/auth-provider";
 
 const reactionIcons: Record<ReactionType, typeof ThumbsUp> = {
   like: ThumbsUp,
-  fire: Flame,
+  fire: ThumbsDown,
   insightful: Lightbulb,
   funny: Laugh,
   gg: Sparkles,
@@ -31,6 +33,7 @@ function formatPostTime(createdAt: Post["createdAt"]) {
 
 export function PostCard({ post }: { post: Post }) {
   const author = users.find((user) => user.uid === post.authorId) ?? users[0];
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [isFollowed, setIsFollowed] = useState(false);
   const [reactionType, setReactionType] = useState<ReactionType | null>(null);
@@ -43,6 +46,7 @@ export function PostCard({ post }: { post: Post }) {
     gg: post.reactionTypeCounts?.gg ?? 0,
   });
   const LikeIcon = reactionIcons.like;
+  const DislikeIcon = reactionIcons.fire;
   const profilePath = `/profile/${author.handle}`;
 
   async function handleReact(nextReaction: ReactionType) {
@@ -57,6 +61,15 @@ export function PostCard({ post }: { post: Post }) {
         await updateDoc(doc(db, "posts", post.id), {
           [`reactionTypeCounts.${nextReaction}`]: increment(-1),
         });
+        if (nextReaction === "like") {
+          await addXpToUser(author.uid, -10);
+          if (user?.uid === author.uid) {
+            await addGemsToUser(author.uid, -1);
+          }
+        }
+        if (nextReaction === "fire") {
+          await addXpToUser(author.uid, 5);
+        }
         return;
       }
 
@@ -77,6 +90,17 @@ export function PostCard({ post }: { post: Post }) {
       }
 
       await updateDoc(doc(db, "posts", post.id), updates);
+
+      if (nextReaction === "like") {
+        await addXpToUser(author.uid, currentReaction === "fire" ? 15 : 10);
+        if (user?.uid === author.uid) {
+          await addGemsToUser(author.uid, 1);
+        }
+      }
+
+      if (nextReaction === "fire") {
+        await addXpToUser(author.uid, currentReaction === "like" ? -15 : -5);
+      }
     } catch (error) {
       toast.error("Reaction failed");
       console.error("Failed to update reaction", error);
@@ -97,9 +121,12 @@ export function PostCard({ post }: { post: Post }) {
                 event.stopPropagation();
                 navigate(profilePath);
               }}
-            >
-              {author.displayName}
-            </button>
+              >
+                {author.displayName}
+                <span className="ml-2 inline-flex items-center rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--accent)]">
+                  Lv {author.level}
+                </span>
+              </button>
             <div className="absolute left-0 top-full z-20 mt-2 hidden w-72 rounded-3xl border border-border bg-surface p-4 shadow-panel group-hover/name:block">
               <div className="flex items-start gap-3">
                 <Avatar name={author.displayName} src={author.photoURL} />
@@ -161,7 +188,7 @@ export function PostCard({ post }: { post: Post }) {
                 handleReact("fire");
               }}
             >
-              <Flame size={16} /> {reactionCounts.fire}
+              <DislikeIcon size={16} /> {reactionCounts.fire}
             </Button>
             <Button
               variant="ghost"

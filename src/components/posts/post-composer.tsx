@@ -1,4 +1,4 @@
-import { ImagePlus, Send } from "lucide-react";
+import { Send } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -9,6 +9,7 @@ import { Button } from "@/components/common/button";
 import { Avatar } from "@/components/common/avatar";
 import { useAuth } from "@/app/auth-provider";
 import { createPost } from "@/firebase/posts";
+import { addXpToUser } from "@/firebase/users";
 
 const postSchema = z.object({
   content: z.string().trim().min(1).max(300),
@@ -51,6 +52,7 @@ export function PostComposer() {
             tags: [],
             visibility: "public",
           });
+          await addXpToUser(user.uid, 5);
           toast.success("Post published", { description: `Posted "${values.content.slice(0, 40)}${values.content.length > 40 ? "..." : ""}"` });
           reset();
         })}
@@ -65,10 +67,6 @@ export function PostComposer() {
           />
         </div>
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3 text-sm text-textMuted">
-            <ImagePlus size={18} />
-            <span>Posts are saved to Firestore and require a signed-in user.</span>
-          </div>
           <span className="text-sm text-textMuted">{content.length}/300</span>
         </div>
         {errors.content ? <p className="text-sm text-red-500">{errors.content.message}</p> : null}

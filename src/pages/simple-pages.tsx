@@ -25,6 +25,7 @@ import { addGemsToUser, addXpToUser, getDemoUserByHandle, subscribeToUserProfile
 import { useUiStore } from "@/store/use-ui-store";
 import { getXpProgress } from "@/constants/gamification";
 import { deleteDoc } from "firebase/firestore";
+import { themePresets } from "@/lib/theme-presets";
 
 function getFirebaseErrorMessage(error: unknown) {
   if (typeof error !== "object" || error === null) {
@@ -245,15 +246,8 @@ export function ProfilePage() {
 }
 
 export function SettingsPage() {
-  const { theme, accentColor, textScale, setTheme, setAccentColor, setTextScale } = useUiStore();
-
-  const accentPresets = [
-    { label: "Purple", value: "#8b5cf6" },
-    { label: "Orange", value: "#ff8a3d" },
-    { label: "Dark Blue", value: "#123b8f" },
-    { label: "Aqua", value: "#20c7c6" },
-    { label: "Red", value: "#ef4444" },
-  ] as const;
+  const { theme, textScale, setTheme, setTextScale } = useUiStore();
+  const availableThemes = Object.entries(themePresets);
 
   return (
     <PageFrame title="Settings" subtitle="Appearance and account options live here.">
@@ -263,31 +257,51 @@ export function SettingsPage() {
             <Palette size={18} />
             <h2 className="text-lg font-semibold">Appearance</h2>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Button variant={theme === "dark" ? "primary" : "secondary"} onClick={() => setTheme("dark")}>
-              Dark mode
-            </Button>
-            <Button variant={theme === "light" ? "primary" : "secondary"} onClick={() => setTheme("light")}>
-              Light mode
-            </Button>
-          </div>
-          <div className="space-y-2">
-            <p className="text-sm font-semibold">Theme color</p>
-            <div className="flex flex-wrap gap-2">
-              {accentPresets.map((preset) => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  aria-label={preset.label}
-                  title={preset.label}
-                  onClick={() => setAccentColor(preset.value)}
-                  className={`h-11 w-11 rounded-full border-2 transition ${
-                    accentColor === preset.value ? "scale-110 border-text" : "border-transparent"
-                  }`}
-                  style={{ backgroundColor: preset.value }}
-                />
-              ))}
-            </div>
+          <div className="grid gap-3">
+            {availableThemes.map(([themeKey, definition]) => {
+              const isActive = theme === themeKey;
+
+              return (
+                <details
+                  key={themeKey}
+                  open={isActive}
+                  className="rounded-2xl border border-border bg-surfaceAlt/40 p-4"
+                >
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
+                    <div>
+                      <p className="font-semibold">{definition.label}</p>
+                      <p className="text-sm text-textMuted">{definition.description}</p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant={isActive ? "primary" : "secondary"}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        setTheme(themeKey as keyof typeof themePresets);
+                      }}
+                    >
+                      {isActive ? "Active theme" : "Use theme"}
+                    </Button>
+                  </summary>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    {Object.entries(definition.tokens).map(([tokenName, tokenValue]) => (
+                      <div key={tokenName} className="rounded-2xl border border-border bg-surface p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold">{tokenName}</p>
+                            <p className="text-xs text-textMuted">{tokenValue}</p>
+                          </div>
+                          <span
+                            className="h-8 w-8 rounded-full border border-border"
+                            style={{ backgroundColor: tokenValue }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              );
+            })}
           </div>
           <div className="space-y-2">
             <div className="flex items-center justify-between">

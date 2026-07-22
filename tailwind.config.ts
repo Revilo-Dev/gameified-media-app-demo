@@ -2,7 +2,6 @@ import type { Config } from "tailwindcss";
 
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
-  darkMode: ["class", '[data-theme="dark"]', '[data-theme="oled"]'],
   theme: {
     extend: {
       fontFamily: {
@@ -10,6 +9,11 @@ export default {
       },
       colors: {
         accent: "var(--accent)",
+        secondary: "var(--secondary)",
+        error: "var(--error)",
+        info: "var(--info)",
+        background: "var(--background)",
+        onBackground: "var(--on-background)",
         canvas: "var(--canvas)",
         surface: "var(--surface)",
         surfaceAlt: "var(--surface-alt)",

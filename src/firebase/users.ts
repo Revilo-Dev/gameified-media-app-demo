@@ -39,7 +39,7 @@ export async function ensureUserProfile(user: User) {
     isVerified: false,
     isPrivate: false,
     onboardingComplete: false,
-    theme: "dark" as ThemeMode,
+    theme: "graphite" as ThemeMode,
     accentColor: "#ff6b57",
     gems: 0,
     followerCount: 0,

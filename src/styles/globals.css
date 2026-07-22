@@ -3,36 +3,26 @@
 @tailwind utilities;
 
 :root {
-  --accent: #8b5cf6;
+  --accent: #ff6b57;
+  --secondary: #9ca3af;
+  --error: #f87171;
+  --info: #38bdf8;
   --text-scale: 1;
-  --canvas: #f4f1ea;
-  --surface: rgba(255, 255, 255, 0.9);
-  --surface-alt: #ece7dd;
-  --text: #171717;
-  --text-muted: #5b5b66;
-  --border: rgba(23, 23, 23, 0.12);
-}
-
-[data-theme="dark"] {
-  --canvas: #000000;
-  --surface: #050505;
-  --surface-alt: #111111;
-  --text: #f7f7f5;
-  --text-muted: #a3a9b8;
-  --border: rgba(247, 247, 245, 0.12);
+  --background: #1f1f22;
+  --on-background: #f3f4f6;
+  --canvas: var(--background);
+  --surface: #2a2b30;
+  --surface-alt: #34353b;
+  --text: #f3f4f6;
+  --text-muted: #b4b8c2;
+  --border: rgba(243, 244, 246, 0.12);
 }
 
 body {
   @apply bg-canvas text-text antialiased;
   margin: 0;
   font-size: calc(16px * var(--text-scale));
-  background-image:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 20%, transparent), transparent 34%),
-    radial-gradient(circle at top right, rgba(251, 146, 60, 0.18), transparent 28%),
-    radial-gradient(circle at 20% 80%, rgba(34, 211, 238, 0.16), transparent 24%),
-    radial-gradient(circle at 80% 78%, rgba(239, 68, 68, 0.15), transparent 20%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 28%);
-  background-attachment: fixed;
+  background-color: var(--background);
 }
 
 * {

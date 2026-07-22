@@ -149,14 +149,14 @@ export function PostCard({ post }: { post: Post }) {
         <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} />
         <div className="min-w-0 flex-1">
           <div className="relative flex flex-wrap items-center gap-2">
-            <div className="group/name relative inline-flex items-center">
-            <button
-              type="button"
-              className="font-semibold text-left hover:underline"
-              onClick={(event) => {
-                event.stopPropagation();
-                navigate(profilePath);
-              }}
+            <div className="group/name relative inline-flex items-center pb-4">
+              <button
+                type="button"
+                className="font-semibold text-left hover:underline"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  navigate(profilePath);
+                }}
               >
                 {author?.displayName ?? "Unknown profile"}
                 {author ? (
@@ -170,52 +170,58 @@ export function PostCard({ post }: { post: Post }) {
                   </span>
                 ) : null}
               </button>
-            <div className="absolute left-0 top-full z-20 mt-2 hidden w-72 rounded-3xl border border-border bg-surface p-4 shadow-panel group-hover/name:block">
-              <div className="flex items-start gap-3">
-                <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} />
-                <div className="min-w-0">
-                  <p className="font-semibold">{author?.displayName ?? "Unknown"}</p>
-                  <p className="text-sm text-textMuted">@{author?.handle ?? "unknown"}</p>
-                  <p className="mt-2 text-sm text-textMuted">{author?.bio ?? "No bio available."}</p>
+              <div className="pointer-events-none absolute left-0 top-full h-4 w-full" />
+              <div className="absolute left-0 top-full z-20 hidden w-72 pt-4 group-hover/name:block group-focus-within/name:block">
+                <div
+                  className="rounded-3xl border border-border bg-surface p-4 shadow-panel"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="flex items-start gap-3">
+                    <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} />
+                    <div className="min-w-0">
+                      <p className="font-semibold">{author?.displayName ?? "Unknown"}</p>
+                      <p className="text-sm text-textMuted">@{author?.handle ?? "unknown"}</p>
+                      <p className="mt-2 text-sm text-textMuted">{author?.bio ?? "No bio available."}</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex gap-2">
+                    <Button
+                      variant={isFollowed ? "secondary" : "primary"}
+                      className="flex-1"
+                      disabled={!author || isTogglingFollow}
+                      onClick={async (event) => {
+                        event.stopPropagation();
+                        if (!currentUserProfile || !author) {
+                          return;
+                        }
+
+                        setIsTogglingFollow(true);
+                        try {
+                          await setFollowingRelationship(currentUserProfile.uid, author.uid, !isFollowed);
+                        } catch (error) {
+                          console.error("Failed to toggle follow relationship", error);
+                          toast.error("Follow action failed");
+                        } finally {
+                          setIsTogglingFollow(false);
+                        }
+                      }}
+                    >
+                      {isTogglingFollow ? "Saving..." : isFollowed ? "Unfollow" : "Follow"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="flex-1"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        navigate(profilePath);
+                      }}
+                      disabled={!author}
+                    >
+                      Visit
+                    </Button>
+                  </div>
                 </div>
               </div>
-              <div className="mt-4 flex gap-2">
-                <Button
-                  variant={isFollowed ? "secondary" : "primary"}
-                  className="flex-1"
-                  disabled={!author || isTogglingFollow}
-                  onClick={async (event) => {
-                    event.stopPropagation();
-                    if (!currentUserProfile || !author) {
-                      return;
-                    }
-
-                    setIsTogglingFollow(true);
-                    try {
-                      await setFollowingRelationship(currentUserProfile.uid, author.uid, !isFollowed);
-                    } catch (error) {
-                      console.error("Failed to toggle follow relationship", error);
-                      toast.error("Follow action failed");
-                    } finally {
-                      setIsTogglingFollow(false);
-                    }
-                  }}
-                >
-                  {isTogglingFollow ? "Saving..." : isFollowed ? "Unfollow" : "Follow"}
-                </Button>
-                <Button
-                  variant="secondary"
-                  className="flex-1"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    navigate(profilePath);
-                  }}
-                  disabled={!author}
-                >
-                  Visit
-                </Button>
-              </div>
-            </div>
             </div>
             <span className="text-sm text-textMuted">@{author?.handle ?? "unknown"}</span>
             <span className="text-sm text-textMuted">{formatPostTime(post.createdAt)}</span>

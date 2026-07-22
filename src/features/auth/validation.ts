@@ -4,7 +4,7 @@ const reservedHandles = new Set(["admin", "support", "system", "moderator", "roo
 
 export const signupSchema = z
   .object({
-    displayName: z.string().trim().min(2).max(40),
+    displayName: z.string().trim().min(4).max(32),
     handle: z
       .string()
       .trim()

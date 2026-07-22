@@ -1,9 +1,10 @@
-import { collection, doc, getDoc, limit, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, type Unsubscribe } from "firebase/firestore";
+import { collection, doc, getDoc, limit, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, type Unsubscribe } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import { db } from "@/firebase/config";
 import { COLLECTIONS } from "@/firebase/firestore";
-import { xpRequiredForLevel } from "@/constants/gamification";
+import { getLevelForXp } from "@/constants/gamification";
 import type { ThemeMode, UserProfile } from "@/types/models";
+import { users as demoUsers } from "@/lib/demo-data";
 
 function buildHandle(displayName: string, uid: string) {
   return displayName.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 18) || `user${uid.slice(0, 6)}`;
@@ -34,6 +35,7 @@ export async function ensureUserProfile(user: User) {
     credits: 0,
     featuredBadgeId: null,
     isPremium: false,
+    isModerator: false,
     isVerified: false,
     isPrivate: false,
     onboardingComplete: false,
@@ -64,18 +66,11 @@ export async function updateUserProfile(userId: string, updates: Partial<UserPro
   });
 }
 
-function getLevelForXp(xp: number) {
-  let level = 1;
-
-  while (xp >= xpRequiredForLevel(level + 1)) {
-    level += 1;
-  }
-
-  return level;
-}
-
 export async function addXpToUser(userId: string, xpDelta: number) {
   const ref = doc(db, COLLECTIONS.users, userId);
+  let previousLevel = 1;
+  let nextLevel = 1;
+  let nextXp = 0;
 
   await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(ref);
@@ -85,14 +80,18 @@ export async function addXpToUser(userId: string, xpDelta: number) {
     }
 
     const currentXp = Number(snapshot.data().xp ?? 0);
-    const nextXp = Math.max(0, currentXp + xpDelta);
+    previousLevel = Number(snapshot.data().level ?? getLevelForXp(currentXp));
+    nextXp = Math.max(0, currentXp + xpDelta);
+    nextLevel = getLevelForXp(nextXp);
 
     transaction.update(ref, {
       xp: nextXp,
-      level: getLevelForXp(nextXp),
+      level: nextLevel,
       updatedAt: serverTimestamp(),
     });
   });
+
+  return { previousLevel, nextLevel, nextXp };
 }
 
 export async function addGemsToUser(userId: string, gemDelta: number) {
@@ -125,5 +124,42 @@ export function subscribeToXpLeaderboard(onChange: (users: UserProfile[]) => voi
         uid: document.id,
       })),
     );
+  });
+}
+
+export function getDemoUserById(uid: string) {
+  return demoUsers.find((user) => user.uid === uid);
+}
+
+export function getDemoUserByHandle(handle: string) {
+  return demoUsers.find((user) => user.handle === handle);
+}
+
+export function subscribeToUserProfileById(userId: string, onChange: (profile: UserProfile | null) => void): Unsubscribe {
+  const ref = doc(db, COLLECTIONS.users, userId);
+
+  return onSnapshot(ref, (snapshot) => {
+    if (!snapshot.exists()) {
+      console.warn("[profile] missing user doc", { userId });
+      onChange(null);
+      return;
+    }
+
+    onChange({ ...(snapshot.data() as UserProfile), uid: snapshot.id });
+  });
+}
+
+export function subscribeToUserProfileByHandle(handle: string, onChange: (profile: UserProfile | null) => void): Unsubscribe {
+  const profileQuery = query(collection(db, COLLECTIONS.users), where("handle", "==", handle), limit(1));
+
+  return onSnapshot(profileQuery, (snapshot) => {
+    if (snapshot.empty) {
+      console.warn("[profile] missing user handle", { handle });
+      onChange(null);
+      return;
+    }
+
+    const document = snapshot.docs[0];
+    onChange({ ...(document.data() as UserProfile), uid: document.id });
   });
 }

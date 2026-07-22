@@ -35,7 +35,7 @@ export function AppLayout() {
   const navigate = useNavigate();
   const [profile, setProfile] = useState<UserProfile>(users[0]);
   const [followCounts, setFollowCounts] = useState({ followers: users[0].followerCount, following: users[0].followingCount });
-  const profileHandle = user?.email?.split("@")[0] ?? profile.handle;
+  const profileHandle = profile.handle;
   const profilePath = `/profile/${profileHandle}`;
 
   useEffect(() => {
@@ -47,7 +47,7 @@ export function AppLayout() {
     const ref = doc(db, COLLECTIONS.users, user.uid);
     return onSnapshot(ref, (snapshot) => {
       if (snapshot.exists()) {
-        setProfile({ ...users[0], ...snapshot.data(), uid: user.uid } as UserProfile);
+        setProfile({ ...(snapshot.data() as UserProfile), uid: user.uid });
       }
     });
   }, [user]);
@@ -62,14 +62,22 @@ export function AppLayout() {
   }, [profile.followerCount, profile.followingCount, user]);
 
   return (
+    !user ? (
+      <div className="mx-auto grid min-h-screen max-w-lg place-items-center px-4">
+        <Card className="w-full p-6">
+          <p className="mb-4 text-sm text-textMuted">Sign in to continue.</p>
+          <Button className="w-full" onClick={() => navigate("/login")}>Go to login</Button>
+        </Card>
+      </div>
+    ) : (
     <div className="mx-auto min-h-screen max-w-7xl px-3 pb-24 pt-3 sm:px-4 sm:pb-6 lg:grid lg:grid-cols-[280px_minmax(0,1fr)_280px] lg:gap-6">
       <aside className="sticky top-6 hidden self-start lg:block">
         <Card className="space-y-4 p-5">
           <Link to={profilePath} className="flex items-center gap-4 transition hover:opacity-80">
-            <Avatar name={profile.displayName} />
+            <Avatar name={profile.displayName} src={profile.photoURL} />
             <div>
-              <p className="font-semibold">{user?.displayName ?? profile.displayName}</p>
-              <p className="text-sm text-textMuted">@{user?.email?.split("@")[0] ?? profile.handle}</p>
+              <p className="font-semibold">{profile.displayName}</p>
+              <p className="text-sm text-textMuted">@{profile.handle}</p>
             </div>
           </Link>
           <div className="grid grid-cols-2 gap-3 text-sm">
@@ -153,5 +161,6 @@ export function AppLayout() {
         </div>
       </nav>
     </div>
+    )
   );
 }

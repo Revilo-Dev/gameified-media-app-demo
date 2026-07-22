@@ -1,26 +1,48 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
     function isSignedIn() {
       return request.auth != null;
     }
 
     match /users/{userId} {
       allow read: if true;
-      allow update: if isSignedIn() && request.auth.uid == userId;
       allow create: if isSignedIn() && request.auth.uid == userId;
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isSignedIn() && (
+        request.auth.uid == userId ||
+        request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          "xp",
+          "level",
+          "gems",
+          "followerCount",
+          "followingCount",
+          "postCount",
+          "updatedAt"
+        ])
+      );
     }
 
     match /posts/{postId} {
       allow read: if true;
       allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
-      allow update, delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.authorId == request.auth.uid;
+      allow delete: if isSignedIn() && (
+        resource.data.authorId == request.auth.uid ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isModerator == true
+      );
+    }
+
+    match /follows/{followId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.followerId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.followerId == request.auth.uid;
+      allow update: if false;
     }
 
     match /bookmarks/{bookmarkId} {
-      allow read: if isSignedIn() && request.auth.uid == resource.data.userId;
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow read, create, update, delete: if isSignedIn() && request.auth.uid == resource.data.userId;
     }
   }
 }

@@ -21,9 +21,10 @@ import { auth } from "@/firebase/config";
 import { linkGoogleAccount, changeUserPassword, updateDisplayName, uploadProfilePicture } from "@/firebase/auth";
 import { Avatar } from "@/components/common/avatar";
 import { setFollowingRelationship, subscribeToFollowCounts, subscribeToFollowRelationship } from "@/firebase/follows";
-import { addGemsToUser, addXpToUser, subscribeToXpLeaderboard } from "@/firebase/users";
+import { addGemsToUser, addXpToUser, getDemoUserByHandle, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToXpLeaderboard } from "@/firebase/users";
 import { useUiStore } from "@/store/use-ui-store";
 import { getXpProgress } from "@/constants/gamification";
+import { deleteDoc } from "firebase/firestore";
 
 function getFirebaseErrorMessage(error: unknown) {
   if (typeof error !== "object" || error === null) {
@@ -51,6 +52,50 @@ const signupSchema = loginSchema.extend({
   displayName: z.string().min(2).max(40),
 });
 
+function ReplyCard({
+  reply,
+  author,
+  canDelete,
+  onDelete,
+}: {
+  reply: Post;
+  author: (typeof users)[number] | null;
+  canDelete: boolean;
+  onDelete: () => Promise<void>;
+}) {
+  return (
+    <Card className="space-y-4 p-5">
+      <div className="flex items-start gap-4">
+        <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} className="h-12 w-12 rounded-2xl" />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-semibold">{author?.displayName ?? "Unknown profile"}</p>
+            {author ? <span className="rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--accent)]">Lv {author.level}</span> : null}
+            {author?.isPremium ? <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold text-sky-500">Premium</span> : null}
+            {author?.isModerator ? <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-500">Moderator</span> : null}
+          </div>
+          <p className="text-sm text-textMuted">@{author?.handle ?? reply.authorId}</p>
+          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-text">{reply.content}</p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-sm text-textMuted">
+        <span>{reply.replyCount} replies</span>
+        <span>{reply.reactionCount} reactions</span>
+        <span>{reply.repostCount} reposts</span>
+        {canDelete ? (
+          <Button
+            variant="ghost"
+            className="ml-auto px-0 text-red-500"
+            onClick={onDelete}
+          >
+            Delete
+          </Button>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
 export function ExplorePage() {
   return (
     <PageFrame title="Explore" subtitle="Search, trends, suggested users, and popular posts are composed into one discovery surface for the demo.">
@@ -74,13 +119,39 @@ export function ProfilePage() {
   const { handle } = useParams();
   const currentUserHandle = auth.currentUser?.email?.split("@")[0] ?? "";
   const currentUserId = auth.currentUser?.uid ?? "";
-  const user = users.find((profile) => profile.handle === handle) ?? users[0];
-  const isOwnProfile = handle === currentUserHandle || (!handle && currentUserHandle === user.handle);
+  const [user, setUser] = useState(() => (handle ? users.find((profile) => profile.handle === handle) ?? null : null));
+  const isOwnProfile = Boolean(user && (handle === currentUserHandle || user.uid === currentUserId));
   const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const [followCounts, setFollowCounts] = useState({ followers: user.followerCount, following: user.followingCount });
+  const [followCounts, setFollowCounts] = useState({ followers: user?.followerCount ?? 0, following: user?.followingCount ?? 0 });
   const [isFollowing, setIsFollowing] = useState(false);
+  const [isTogglingFollow, setIsTogglingFollow] = useState(false);
 
   useEffect(() => {
+    if (!handle) {
+      return;
+    }
+
+    const demoProfile = getDemoUserByHandle(handle);
+    setUser(demoProfile ?? null);
+    if (demoProfile) {
+      setFollowCounts({ followers: demoProfile.followerCount, following: demoProfile.followingCount });
+    }
+
+    const unsubscribeProfile = subscribeToUserProfileByHandle(handle, (profile) => {
+      setUser(profile ?? demoProfile ?? null);
+      if (profile) {
+        setFollowCounts({ followers: profile.followerCount, following: profile.followingCount });
+      }
+    });
+
+    return unsubscribeProfile;
+  }, [handle]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
     setFollowCounts({ followers: user.followerCount, following: user.followingCount });
 
     if (!currentUserId || user.uid === currentUserId) {
@@ -94,7 +165,15 @@ export function ProfilePage() {
       unsubscribeCounts();
       unsubscribeRelationship();
     };
-  }, [currentUserId, user.followingCount, user.followerCount, user.uid]);
+  }, [currentUserId, user?.followingCount, user?.followerCount, user?.uid]);
+
+  if (!user) {
+    return (
+      <PageFrame title="Profile not found" subtitle="This profile is not available in the current demo dataset.">
+        <Card className="p-6 text-sm text-textMuted">We could not find a profile for @{handle ?? "unknown"}.</Card>
+      </PageFrame>
+    );
+  }
 
   return (
     <PageFrame title={user.displayName} subtitle={user.bio}>
@@ -120,6 +199,7 @@ export function ProfilePage() {
         <div className="flex justify-end">
           <Button
             variant="secondary"
+            disabled={isTogglingFollow}
             onClick={() => {
               if (isOwnProfile) {
                 setIsEditorOpen(true);
@@ -128,10 +208,20 @@ export function ProfilePage() {
               if (!currentUserId) {
                 return;
               }
-              void setFollowingRelationship(currentUserId, user.uid, !isFollowing);
+              void (async () => {
+                setIsTogglingFollow(true);
+                try {
+                  await setFollowingRelationship(currentUserId, user.uid, !isFollowing);
+                } catch (error) {
+                  console.error("Failed to toggle follow relationship", error);
+                  toast.error("Follow action failed");
+                } finally {
+                  setIsTogglingFollow(false);
+                }
+              })();
             }}
           >
-            {isOwnProfile ? "Edit profile" : isFollowing ? "Unfollow" : "Follow"}
+            {isOwnProfile ? "Edit profile" : isTogglingFollow ? "Saving..." : isFollowing ? "Unfollow" : "Follow"}
           </Button>
         </div>
         <div className="grid grid-cols-3 gap-3 text-sm">
@@ -524,13 +614,66 @@ export function OnboardingPage() {
 export function PostPage() {
   const { postId } = useParams();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [posts, setPosts] = useState<Post[]>([]);
   const [replyText, setReplyText] = useState("");
+  const [isFollowingAuthor, setIsFollowingAuthor] = useState(false);
+  const [author, setAuthor] = useState<ReturnType<typeof getDemoUserByHandle> | null>(null);
+  const [currentUserProfile, setCurrentUserProfile] = useState<ReturnType<typeof getDemoUserByHandle> | null>(null);
+  const [replyAuthors, setReplyAuthors] = useState<Record<string, (typeof users)[number] | null>>({});
 
   useEffect(() => subscribeToPosts(setPosts), []);
 
   const post = posts.find((item: Post) => item.id === postId);
   const replies = posts.filter((item: Post) => item.parentPostId === postId);
+
+  useEffect(() => {
+    if (!user) {
+      setCurrentUserProfile(null);
+      return;
+    }
+
+    return subscribeToUserProfileById(user.uid, (profile) => {
+      setCurrentUserProfile(profile);
+    });
+  }, [user]);
+
+  useEffect(() => {
+    if (!post) {
+      return;
+    }
+
+    const demoProfile = users.find((profile) => profile.uid === post.authorId) ?? null;
+    setAuthor(demoProfile);
+
+    return subscribeToUserProfileById(post.authorId, (profile) => {
+      setAuthor(profile ?? demoProfile);
+      if (!profile) {
+        console.warn("[post-page] missing author profile", { postId: post.id, authorId: post.authorId });
+      }
+    });
+  }, [post?.authorId, post?.id]);
+
+  useEffect(() => {
+    if (!replies.length) {
+      setReplyAuthors({});
+      return;
+    }
+
+    setReplyAuthors(
+      Object.fromEntries(
+        replies.map((reply) => [reply.id, users.find((profile) => profile.uid === reply.authorId) ?? null]),
+      ),
+    );
+  }, [replies.length, post?.id]);
+
+  useEffect(() => {
+    if (!user || !author || author.uid === user.uid) {
+      return;
+    }
+
+    return subscribeToFollowRelationship(user.uid, author.uid, setIsFollowingAuthor);
+  }, [author?.uid, user?.uid]);
 
   return (
     <PageFrame title="Post Thread" subtitle="Thread view, nested replies, quoted repost context, and moderation actions.">
@@ -538,23 +681,87 @@ export function PostPage() {
         <Card className="p-6 text-sm text-textMuted">Post not found.</Card>
       ) : (
         <div className="space-y-5">
+          <div className="flex items-center justify-between">
+            <Button variant="secondary" onClick={() => navigate(-1)}>
+              Back
+            </Button>
+            <p className="text-sm text-textMuted">{replies.length} comments</p>
+          </div>
           <Card className="space-y-4 p-6">
-            <p className="text-sm text-textMuted">@{users.find((profile) => profile.uid === post.authorId)?.handle ?? "unknown"}</p>
+            <div className="flex items-start gap-4">
+              <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} className="h-16 w-16 rounded-3xl" />
+              <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-lg font-semibold">{author?.displayName ?? "Unknown profile"}</p>
+                  {author ? <span className="rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-xs font-semibold text-[color:var(--accent)]">Lv {author.level}</span> : null}
+                  {author?.isModerator ? <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-semibold text-sky-500">Moderator</span> : null}
+                </div>
+                <p className="text-sm text-textMuted">@{author?.handle ?? "unknown"} • {author?.location ?? "No location"}</p>
+                <p className="mt-2 text-sm text-textMuted">{author?.bio ?? "No bio available."}</p>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-textMuted">
+                  <span className="rounded-full border border-border px-3 py-1">{author?.followerCount ?? 0} followers</span>
+                  <span className="rounded-full border border-border px-3 py-1">{author?.followingCount ?? 0} following</span>
+                  <span className="rounded-full border border-border px-3 py-1">{author?.badgeCount ?? 0} badges</span>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                {author && user?.uid !== author.uid ? (
+                  <Button
+                    variant={isFollowingAuthor ? "secondary" : "primary"}
+                    onClick={async () => {
+                      if (!user) {
+                        return;
+                      }
+                      await setFollowingRelationship(user.uid, author.uid, !isFollowingAuthor);
+                    }}
+                  >
+                    {isFollowingAuthor ? "Unfollow" : "Follow"}
+                  </Button>
+                ) : null}
+                {currentUserProfile && (currentUserProfile.uid === author?.uid || currentUserProfile.isModerator) ? (
+                  <Button
+                    variant="secondary"
+                    onClick={async () => {
+                      await deleteDoc(doc(db, "posts", post.id));
+                      navigate("/");
+                    }}
+                  >
+                    Delete post
+                  </Button>
+                ) : null}
+              </div>
+            </div>
             <p className="text-lg font-semibold">{post.content}</p>
           </Card>
           <Card className="space-y-4 p-6">
             <div className="flex items-center gap-2 font-semibold">
               <MessageCircle size={18} />
               Comments
+              <span className="rounded-full bg-surfaceAlt px-2 py-0.5 text-xs font-medium text-textMuted">{replies.length}</span>
             </div>
             {replies.length ? (
               <div className="space-y-3">
-                {replies.map((reply: Post) => (
-                  <div key={reply.id} className="rounded-2xl border border-border p-4 text-sm">
-                    <p className="text-textMuted">@{users.find((profile) => profile.uid === reply.authorId)?.handle ?? "unknown"}</p>
-                    <p className="mt-1">{reply.content}</p>
-                  </div>
-                ))}
+                {replies.map((reply: Post) => {
+                  const replyAuthor = replyAuthors[reply.id] ?? null;
+                  const canDeleteReply = Boolean(currentUserProfile && (currentUserProfile.uid === reply.authorId || currentUserProfile.isModerator));
+
+                  if (!replyAuthor) {
+                    console.warn("[post-page] missing reply author profile", { replyId: reply.id, authorId: reply.authorId });
+                  }
+
+                  return (
+                    <ReplyCard
+                      key={reply.id}
+                      reply={reply}
+                      author={replyAuthor}
+                      canDelete={canDeleteReply}
+                      onDelete={async () => {
+                        await deleteDoc(doc(db, "posts", reply.id));
+                        await updateDoc(doc(db, "posts", post.id), { replyCount: increment(-1) });
+                      }}
+                    />
+                  );
+                })}
               </div>
             ) : (
               <p className="text-sm text-textMuted">No comments yet.</p>
@@ -563,6 +770,7 @@ export function PostPage() {
               <input
                 value={replyText}
                 onChange={(event) => setReplyText(event.target.value)}
+                maxLength={280}
                 placeholder="Write a reply..."
                 className="min-w-0 flex-1 rounded-full border border-border bg-transparent px-4 py-2 text-sm outline-none"
               />

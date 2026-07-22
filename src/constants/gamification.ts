@@ -12,15 +12,26 @@ export function xpRequiredForLevel(level: number) {
   return Math.floor(100 * Math.pow(level, 1.45));
 }
 
+export function getLevelForXp(xp: number) {
+  let level = 1;
+
+  while (xp >= xpRequiredForLevel(level + 1)) {
+    level += 1;
+  }
+
+  return level;
+}
+
 export function getXpProgress(xp: number, level: number) {
-  const currentLevelFloor = level <= 1 ? 0 : xpRequiredForLevel(level - 1);
-  const nextLevelCeiling = xpRequiredForLevel(level);
-  const earned = xp - currentLevelFloor;
+  const safeLevel = Math.max(level, getLevelForXp(xp));
+  const currentLevelFloor = safeLevel <= 1 ? 0 : xpRequiredForLevel(safeLevel - 1);
+  const nextLevelCeiling = xpRequiredForLevel(safeLevel);
+  const earned = Math.max(0, xp - currentLevelFloor);
   const needed = nextLevelCeiling - currentLevelFloor;
 
   return {
-    earned,
+    earned: Math.min(needed, earned),
     needed,
-    percentage: Math.min(100, Math.round((earned / needed) * 100)),
+    percentage: Math.min(100, Math.round((Math.min(needed, earned) / needed) * 100)),
   };
 }

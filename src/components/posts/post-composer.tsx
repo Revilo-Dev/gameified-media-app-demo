@@ -9,7 +9,9 @@ import { Button } from "@/components/common/button";
 import { Avatar } from "@/components/common/avatar";
 import { useAuth } from "@/app/auth-provider";
 import { createPost } from "@/firebase/posts";
-import { addXpToUser } from "@/firebase/users";
+import { addXpToUser, subscribeToUserProfileById } from "@/firebase/users";
+import { uploadPostImage } from "@/firebase/storage";
+import { useEffect, useState } from "react";
 
 const postSchema = z.object({
   content: z.string().trim().min(1).max(300),
@@ -20,6 +22,8 @@ type PostFormValues = z.infer<typeof postSchema>;
 export function PostComposer() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [isPremium, setIsPremium] = useState(false);
+  const [pendingImageURL, setPendingImageURL] = useState<string | null>(null);
   const {
     register,
     watch,
@@ -33,6 +37,17 @@ export function PostComposer() {
 
   const content = watch("content");
 
+  useEffect(() => {
+    if (!user) {
+      setIsPremium(false);
+      return;
+    }
+
+    return subscribeToUserProfileById(user.uid, (profile) => {
+      setIsPremium(profile?.isPremium ?? false);
+    });
+  }, [user]);
+
   return (
     <Card className="p-5">
       <form
@@ -42,10 +57,15 @@ export function PostComposer() {
             return;
           }
 
+          if (pendingImageURL && !isPremium) {
+            toast.error("Premium required", { description: "Only premium accounts can upload post images." });
+            return;
+          }
+
           await createPost({
             authorId: user.uid,
             content: values.content.trim(),
-            imageURL: null,
+            imageURL: pendingImageURL,
             parentPostId: null,
             repostedPostId: null,
             quotedPostId: null,
@@ -55,6 +75,7 @@ export function PostComposer() {
           await addXpToUser(user.uid, 5);
           toast.success("Post published", { description: `Posted "${values.content.slice(0, 40)}${values.content.length > 40 ? "..." : ""}"` });
           reset();
+          setPendingImageURL(null);
         })}
         className="space-y-4"
       >
@@ -68,7 +89,34 @@ export function PostComposer() {
         </div>
         <div className="flex items-center justify-between">
           <span className="text-sm text-textMuted">{content.length}/300</span>
+          {isPremium ? (
+            <label className="cursor-pointer rounded-full border border-border px-3 py-2 text-sm">
+              Add image
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0];
+                  if (!file) {
+                    return;
+                  }
+
+                  try {
+                    const imageURL = await uploadPostImage(file);
+                    setPendingImageURL(imageURL);
+                    toast.success("Image attached");
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "Unable to upload image");
+                  }
+                }}
+              />
+            </label>
+          ) : (
+            <span className="text-xs text-textMuted">Text posts only for free accounts</span>
+          )}
         </div>
+        {pendingImageURL ? <p className="text-xs text-textMuted">Image attached</p> : null}
         {errors.content ? <p className="text-sm text-red-500">{errors.content.message}</p> : null}
         <div className="flex justify-end">
           <Button disabled={isSubmitting || !content.trim()} className="gap-2">

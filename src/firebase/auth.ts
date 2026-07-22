@@ -10,10 +10,12 @@ import {
   updatePassword,
   updateProfile,
 } from "firebase/auth";
-import { auth } from "@/firebase/config";
+import { doc, getDoc } from "firebase/firestore";
+import { auth, db } from "@/firebase/config";
 import { storage } from "@/firebase/config";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { updateUserProfile } from "@/firebase/users";
+import { COLLECTIONS } from "@/firebase/firestore";
 
 export async function signInWithGoogle() {
   return signInWithPopup(auth, new GoogleAuthProvider());
@@ -53,6 +55,11 @@ export async function updateDisplayName(displayName: string) {
 export async function uploadProfilePicture(file: File) {
   if (!auth.currentUser) {
     throw new Error("No signed-in user.");
+  }
+
+  const profileSnapshot = await getDoc(doc(db, COLLECTIONS.users, auth.currentUser.uid));
+  if (!profileSnapshot.exists() || !profileSnapshot.data().isPremium) {
+    throw new Error("Premium account required to upload a profile picture.");
   }
 
   const pictureRef = ref(storage, `profile-pictures/${auth.currentUser.uid}/${Date.now()}-${file.name}`);

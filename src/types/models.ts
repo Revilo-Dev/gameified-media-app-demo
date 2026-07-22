@@ -30,6 +30,7 @@ export interface UserProfile {
   credits: number;
   featuredBadgeId: string | null;
   isPremium: boolean;
+  isModerator: boolean;
   isVerified: boolean;
   isPrivate: boolean;
   onboardingComplete: boolean;

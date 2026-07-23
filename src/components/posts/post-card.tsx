@@ -1,19 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
-import { Laugh, Lightbulb, MessageCircle, Repeat2, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Bookmark, Laugh, Lightbulb, MessageCircle, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { users } from "@/lib/demo-data";
-import type { Post, ReactionType } from "@/types/models";
+import type { Post, ReactionType, UserProfile } from "@/types/models";
 import { Avatar } from "@/components/common/avatar";
 import { Card } from "@/components/common/card";
 import { Button } from "@/components/common/button";
 import { deleteDoc, doc, increment, updateDoc } from "firebase/firestore";
 import { db } from "@/firebase/config";
 import { addGemsToUser, addXpToUser, getDemoUserById, subscribeToUserProfileById } from "@/firebase/users";
-import type { UserProfile } from "@/types/models";
 import { useAuth } from "@/app/auth-provider";
 import { setFollowingRelationship, subscribeToFollowRelationship } from "@/firebase/follows";
+import { setPostBookmarked, subscribeToBookmarkedPostIds } from "@/firebase/bookmarks";
+import { UserBadges } from "@/components/common/user-badges";
 
 const reactionIcons: Record<ReactionType, typeof ThumbsUp> = {
   like: ThumbsUp,
@@ -38,6 +39,7 @@ export function PostCard({ post }: { post: Post }) {
   const navigate = useNavigate();
   const [isFollowed, setIsFollowed] = useState(false);
   const [isTogglingFollow, setIsTogglingFollow] = useState(false);
+  const [isBookmarked, setIsBookmarked] = useState(false);
   const [author, setAuthor] = useState(users.find((item) => item.uid === post.authorId) ?? null);
   const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
   const [reactionType, setReactionType] = useState<ReactionType | null>(null);
@@ -71,6 +73,17 @@ export function PostCard({ post }: { post: Post }) {
   }, [author?.uid, currentUserProfile?.uid]);
 
   useEffect(() => {
+    if (!user) {
+      setIsBookmarked(false);
+      return;
+    }
+
+    return subscribeToBookmarkedPostIds(user.uid, (postIds) => {
+      setIsBookmarked(postIds.includes(post.id));
+    });
+  }, [post.id, user]);
+
+  useEffect(() => {
     setAuthor(getDemoUserById(post.authorId) ?? null);
 
     return subscribeToUserProfileById(post.authorId, (profile) => {
@@ -83,6 +96,7 @@ export function PostCard({ post }: { post: Post }) {
   }, [post.authorId, post.id]);
 
   const canDeletePost = Boolean(currentUserProfile && (currentUserProfile.uid === author?.uid || currentUserProfile.isModerator));
+  const bookmarkCount = useMemo(() => post.bookmarkCount, [post.bookmarkCount]);
 
   async function handleReact(nextReaction: ReactionType) {
     const currentReaction = reactionType;
@@ -164,11 +178,7 @@ export function PostCard({ post }: { post: Post }) {
                     Lv {author.level}
                   </span>
                 ) : null}
-                {author?.isModerator ? (
-                  <span className="ml-2 inline-flex items-center rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold text-sky-500">
-                    Moderator
-                  </span>
-                ) : null}
+                {author ? <span className="ml-2 inline-flex items-center gap-1"><UserBadges user={author} /></span> : null}
               </button>
               <div className="pointer-events-none absolute left-0 top-full h-4 w-full" />
               <div className="absolute left-0 top-full z-20 hidden w-72 pt-4 group-hover/name:block group-focus-within/name:block">
@@ -188,7 +198,7 @@ export function PostCard({ post }: { post: Post }) {
                     <Button
                       variant={isFollowed ? "secondary" : "primary"}
                       className="flex-1"
-                      disabled={!author || isTogglingFollow}
+                      disabled={!author || isTogglingFollow || currentUserProfile?.uid === author?.uid}
                       onClick={async (event) => {
                         event.stopPropagation();
                         if (!currentUserProfile || !author) {
@@ -206,7 +216,7 @@ export function PostCard({ post }: { post: Post }) {
                         }
                       }}
                     >
-                      {isTogglingFollow ? "Saving..." : isFollowed ? "Unfollow" : "Follow"}
+                      {currentUserProfile?.uid === author?.uid ? "You" : isTogglingFollow ? "Saving..." : isFollowed ? "Unfollow" : "Follow"}
                     </Button>
                     <Button
                       variant="secondary"
@@ -227,12 +237,19 @@ export function PostCard({ post }: { post: Post }) {
             <span className="text-sm text-textMuted">{formatPostTime(post.createdAt)}</span>
           </div>
           <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-text">{post.content}</p>
+          {post.imageURL ? (
+            <img
+              src={post.imageURL}
+              alt="Post attachment"
+              className="mt-4 max-h-[32rem] w-full rounded-3xl border border-border object-cover"
+            />
+          ) : null}
           <div className="mt-3 flex flex-wrap gap-2 text-xs text-accent">
             {post.tags.map((tag) => (
               <span key={tag}>#{tag}</span>
             ))}
           </div>
-          <div className="mt-4 flex items-center gap-2 text-textMuted">
+          <div className="mt-4 flex items-center gap-4 text-textMuted">
             <Button
               variant="ghost"
               className="gap-2 px-0"
@@ -265,10 +282,24 @@ export function PostCard({ post }: { post: Post }) {
             </Button>
             <Button
               variant="ghost"
-              className="gap-2 px-0"
-              onClick={(event) => event.stopPropagation()}
+              className={`gap-2 px-0 ${isBookmarked ? "text-amber-400" : ""}`}
+              onClick={async (event) => {
+                event.stopPropagation();
+                if (!user) {
+                  navigate("/login");
+                  return;
+                }
+
+                try {
+                  await setPostBookmarked(user.uid, post.id, !isBookmarked);
+                  setIsBookmarked(!isBookmarked);
+                } catch (error) {
+                  console.error("Failed to toggle bookmark", error);
+                  toast.error("Bookmark action failed");
+                }
+              }}
             >
-              <Repeat2 size={16} /> {post.repostCount}
+              <Bookmark size={16} fill={isBookmarked ? "currentColor" : "none"} /> {bookmarkCount}
             </Button>
             {canDeletePost ? (
               <Button

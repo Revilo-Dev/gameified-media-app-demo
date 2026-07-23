@@ -1,8 +1,10 @@
 import {
   Bell,
   Bookmark,
+  Gamepad2,
   Home,
   Info,
+  LayoutGrid,
   MessageSquare,
   Settings,
   Trophy,
@@ -27,6 +29,8 @@ const navItems = [
   { to: "/explore", label: "Explore", icon: Info },
   { to: "/chat", label: "Chat", icon: MessageSquare },
   { to: "/notifications", label: "Notifications", icon: Bell },
+  { to: "/arcade", label: "Arcade", icon: Gamepad2 },
+  { to: "/market", label: "Market", icon: LayoutGrid },
   { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
 ];
 
@@ -143,7 +147,7 @@ export function AppLayout() {
       </aside>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-canvas/95 px-3 py-2 backdrop-blur lg:hidden">
-        <div className="mx-auto grid max-w-md grid-cols-5 gap-2">
+        <div className="mx-auto grid max-w-md grid-cols-7 gap-2">
           {navItems.map((item) => (
             <NavLink
               key={item.to}

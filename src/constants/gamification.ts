@@ -24,8 +24,8 @@ export function getLevelForXp(xp: number) {
 
 export function getXpProgress(xp: number, level: number) {
   const safeLevel = Math.max(level, getLevelForXp(xp));
-  const currentLevelFloor = safeLevel <= 1 ? 0 : xpRequiredForLevel(safeLevel - 1);
-  const nextLevelCeiling = xpRequiredForLevel(safeLevel);
+  const currentLevelFloor = safeLevel <= 1 ? 0 : xpRequiredForLevel(safeLevel);
+  const nextLevelCeiling = xpRequiredForLevel(safeLevel + 1);
   const earned = Math.max(0, xp - currentLevelFloor);
   const needed = nextLevelCeiling - currentLevelFloor;
 

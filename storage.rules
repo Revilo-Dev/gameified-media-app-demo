@@ -1,6 +1,10 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    function userProfile() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid));
+    }
+
     function isSignedIn() {
       return request.auth != null;
     }
@@ -8,7 +12,13 @@ service firebase.storage {
     function isImageUpload() {
       return request.resource != null
         && request.resource.contentType.matches('image/.*')
-        && request.resource.size < 5 * 1024 * 1024;
+        && request.resource.size <= maxUploadSizeBytes();
+    }
+
+    function maxUploadSizeBytes() {
+      return userProfile().data.isPremium == true
+        ? 500 * 1024 * 1024
+        : 100 * 1024 * 1024;
     }
 
     match /avatars/{userId}/{fileName} {

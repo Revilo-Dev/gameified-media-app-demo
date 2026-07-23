@@ -12,6 +12,8 @@ import { createPost } from "@/firebase/posts";
 import { addXpToUser, subscribeToUserProfileById } from "@/firebase/users";
 import { uploadPostImage } from "@/firebase/storage";
 import { useEffect, useState } from "react";
+import type { UserProfile } from "@/types/models";
+import { UserBadges } from "@/components/common/user-badges";
 
 const postSchema = z.object({
   content: z.string().trim().min(1).max(300),
@@ -23,6 +25,7 @@ export function PostComposer() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [isPremium, setIsPremium] = useState(false);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [pendingImageURL, setPendingImageURL] = useState<string | null>(null);
   const {
     register,
@@ -40,11 +43,13 @@ export function PostComposer() {
   useEffect(() => {
     if (!user) {
       setIsPremium(false);
+      setProfile(null);
       return;
     }
 
     return subscribeToUserProfileById(user.uid, (profile) => {
       setIsPremium(profile?.isPremium ?? false);
+      setProfile(profile);
     });
   }, [user]);
 
@@ -54,11 +59,6 @@ export function PostComposer() {
         onSubmit={handleSubmit(async (values) => {
           if (!user) {
             navigate("/login");
-            return;
-          }
-
-          if (pendingImageURL && !isPremium) {
-            toast.error("Premium required", { description: "Only premium accounts can upload post images." });
             return;
           }
 
@@ -80,43 +80,53 @@ export function PostComposer() {
         className="space-y-4"
       >
         <div className="flex gap-4">
-          <Avatar name={user?.displayName ?? "Guest"} />
-          <textarea
-            {...register("content")}
-            placeholder="Share a pulse with your crew..."
-            className="min-h-28 flex-1 resize-none rounded-3xl border border-border bg-transparent p-4 text-sm text-text outline-none placeholder:text-textMuted"
-          />
+          <Avatar name={user?.displayName ?? "Guest"} src={profile?.photoURL ?? null} />
+          <div className="flex-1 space-y-3">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-semibold">{profile?.displayName ?? user?.displayName ?? "Guest"}</p>
+                {profile ? <span className="rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--accent)]">Lv {profile.level}</span> : null}
+                {profile ? <UserBadges user={profile} /> : null}
+              </div>
+              <p className="text-sm text-textMuted">@{profile?.handle ?? "guest"}</p>
+            </div>
+            <textarea
+              {...register("content")}
+              placeholder="Share a pulse with your crew..."
+              className="min-h-28 w-full resize-none rounded-3xl border border-border bg-transparent p-4 text-sm text-text outline-none placeholder:text-textMuted"
+            />
+          </div>
         </div>
         <div className="flex items-center justify-between">
           <span className="text-sm text-textMuted">{content.length}/300</span>
-          {isPremium ? (
-            <label className="cursor-pointer rounded-full border border-border px-3 py-2 text-sm">
-              Add image
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={async (event) => {
-                  const file = event.target.files?.[0];
-                  if (!file) {
-                    return;
-                  }
+          <label className="cursor-pointer rounded-full border border-border px-3 py-2 text-sm">
+            Add image
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (event) => {
+                const file = event.target.files?.[0];
+                if (!file) {
+                  return;
+                }
 
-                  try {
-                    const imageURL = await uploadPostImage(file);
-                    setPendingImageURL(imageURL);
-                    toast.success("Image attached");
-                  } catch (error) {
-                    toast.error(error instanceof Error ? error.message : "Unable to upload image");
-                  }
-                }}
-              />
-            </label>
-          ) : (
-            <span className="text-xs text-textMuted">Text posts only for free accounts</span>
-          )}
+                try {
+                  const imageURL = await uploadPostImage(file);
+                  setPendingImageURL(imageURL);
+                  toast.success("Image attached", {
+                    description: isPremium ? "Premium accounts can upload up to 500MB." : "Standard accounts can upload up to 100MB.",
+                  });
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Unable to upload image");
+                }
+              }}
+            />
+          </label>
         </div>
-        {pendingImageURL ? <p className="text-xs text-textMuted">Image attached</p> : null}
+        <p className="text-xs text-textMuted">
+          {pendingImageURL ? "Image attached." : isPremium ? "Image uploads up to 500MB." : "Image uploads up to 100MB."}
+        </p>
         {errors.content ? <p className="text-sm text-red-500">{errors.content.message}</p> : null}
         <div className="flex justify-end">
           <Button disabled={isSubmitting || !content.trim()} className="gap-2">

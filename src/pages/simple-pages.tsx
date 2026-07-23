@@ -14,7 +14,7 @@ import { useAuth } from "@/app/auth-provider";
 import { ensureUserProfile } from "@/firebase/users";
 import { createPost, subscribeToPosts } from "@/firebase/posts";
 import type { Post } from "@/types/models";
-import { Crown, MessageCircle, Palette } from "lucide-react";
+import { Bookmark, Crown, MessageCircle, Palette } from "lucide-react";
 import { doc, increment, updateDoc } from "firebase/firestore";
 import { db } from "@/firebase/config";
 import { auth } from "@/firebase/config";
@@ -26,6 +26,11 @@ import { useUiStore } from "@/store/use-ui-store";
 import { getXpProgress } from "@/constants/gamification";
 import { deleteDoc } from "firebase/firestore";
 import { themePresets } from "@/lib/theme-presets";
+import { banUserAccount } from "@/firebase/functions";
+import { subscribeToPostsByAuthor } from "@/firebase/posts";
+import { subscribeToBookmarkedPosts } from "@/firebase/bookmarks";
+import { UserBadges } from "@/components/common/user-badges";
+import { PostCard } from "@/components/posts/post-card";
 
 function getFirebaseErrorMessage(error: unknown) {
   if (typeof error !== "object" || error === null) {
@@ -39,6 +44,10 @@ function getFirebaseErrorMessage(error: unknown) {
 function PageFrame({ title, subtitle, children }: { title: string; subtitle: string; children?: ReactNode }) {
   return (
     <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-semibold">{title}</h1>
+        <p className="mt-1 text-sm text-textMuted">{subtitle}</p>
+      </div>
       {children}
     </div>
   );
@@ -72,8 +81,7 @@ function ReplyCard({
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-semibold">{author?.displayName ?? "Unknown profile"}</p>
             {author ? <span className="rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--accent)]">Lv {author.level}</span> : null}
-            {author?.isPremium ? <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold text-sky-500">Premium</span> : null}
-            {author?.isModerator ? <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-500">Moderator</span> : null}
+            {author ? <UserBadges user={author} /> : null}
           </div>
           <p className="text-sm text-textMuted">@{author?.handle ?? reply.authorId}</p>
           <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-text">{reply.content}</p>
@@ -126,6 +134,7 @@ export function ProfilePage() {
   const [followCounts, setFollowCounts] = useState({ followers: user?.followerCount ?? 0, following: user?.followingCount ?? 0 });
   const [isFollowing, setIsFollowing] = useState(false);
   const [isTogglingFollow, setIsTogglingFollow] = useState(false);
+  const [userPosts, setUserPosts] = useState<Post[]>([]);
 
   useEffect(() => {
     if (!handle) {
@@ -168,6 +177,17 @@ export function ProfilePage() {
     };
   }, [currentUserId, user?.followingCount, user?.followerCount, user?.uid]);
 
+  useEffect(() => {
+    if (!user?.uid) {
+      setUserPosts([]);
+      return;
+    }
+
+    return subscribeToPostsByAuthor(user.uid, (posts) => {
+      setUserPosts(posts.filter((post) => !post.parentPostId));
+    });
+  }, [user?.uid]);
+
   if (!user) {
     return (
       <PageFrame title="Profile not found" subtitle="This profile is not available in the current demo dataset.">
@@ -183,7 +203,11 @@ export function ProfilePage() {
           <Avatar name={user.displayName} src={user.photoURL} className="h-20 w-20 rounded-3xl" />
           <div className="min-w-0 flex-1">
             <p className="text-2xl font-bold">{user.displayName}</p>
-            <p className="mt-1 text-sm text-textMuted">@{user.handle} • {user.location}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-textMuted">
+              <span>@{user.handle}</span>
+              <UserBadges user={user} />
+              {user.location ? <span>{user.location}</span> : null}
+            </div>
             <div className="mt-4 grid gap-3 md:grid-cols-[auto_minmax(0,1fr)] md:items-center">
               <div className="flex flex-wrap gap-3 text-sm">
                 <span className="rounded-2xl border border-border px-3 py-2">
@@ -198,32 +222,37 @@ export function ProfilePage() {
           </div>
         </div>
         <div className="flex justify-end">
-          <Button
-            variant="secondary"
-            disabled={isTogglingFollow}
-            onClick={() => {
-              if (isOwnProfile) {
-                setIsEditorOpen(true);
-                return;
-              }
-              if (!currentUserId) {
-                return;
-              }
-              void (async () => {
-                setIsTogglingFollow(true);
-                try {
-                  await setFollowingRelationship(currentUserId, user.uid, !isFollowing);
-                } catch (error) {
-                  console.error("Failed to toggle follow relationship", error);
-                  toast.error("Follow action failed");
-                } finally {
-                  setIsTogglingFollow(false);
+          <div className="flex flex-wrap justify-end gap-3">
+            <Button
+              variant="secondary"
+              disabled={isTogglingFollow}
+              onClick={() => {
+                if (isOwnProfile) {
+                  setIsEditorOpen(true);
+                  return;
                 }
-              })();
-            }}
-          >
-            {isOwnProfile ? "Edit profile" : isTogglingFollow ? "Saving..." : isFollowing ? "Unfollow" : "Follow"}
-          </Button>
+                if (!currentUserId) {
+                  return;
+                }
+                void (async () => {
+                  setIsTogglingFollow(true);
+                  try {
+                    await setFollowingRelationship(currentUserId, user.uid, !isFollowing);
+                  } catch (error) {
+                    console.error("Failed to toggle follow relationship", error);
+                    toast.error("Follow action failed");
+                  } finally {
+                    setIsTogglingFollow(false);
+                  }
+                })();
+              }}
+            >
+              {isOwnProfile ? "Edit profile" : isTogglingFollow ? "Saving..." : isFollowing ? "Unfollow" : "Follow"}
+            </Button>
+            {currentUserId && !isOwnProfile ? (
+              <ModeratorBanButton targetUserId={user.uid} />
+            ) : null}
+          </div>
         </div>
         <div className="grid grid-cols-3 gap-3 text-sm">
           <div className="rounded-2xl border border-border p-4">
@@ -240,6 +269,12 @@ export function ProfilePage() {
           </div>
         </div>
       </Card>
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Posts</h2>
+        {userPosts.length ? userPosts.map((post) => <PostCard key={post.id} post={post} />) : (
+          <Card className="p-6 text-sm text-textMuted">No posts yet.</Card>
+        )}
+      </section>
       {isOwnProfile ? <EditProfileModal open={isEditorOpen} onClose={() => setIsEditorOpen(false)} profile={user} /> : null}
     </PageFrame>
   );
@@ -283,21 +318,10 @@ export function SettingsPage() {
                       {isActive ? "Active theme" : "Use theme"}
                     </Button>
                   </summary>
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    {Object.entries(definition.tokens).map(([tokenName, tokenValue]) => (
-                      <div key={tokenName} className="rounded-2xl border border-border bg-surface p-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-semibold">{tokenName}</p>
-                            <p className="text-xs text-textMuted">{tokenValue}</p>
-                          </div>
-                          <span
-                            className="h-8 w-8 rounded-full border border-border"
-                            style={{ backgroundColor: tokenValue }}
-                          />
-                        </div>
-                      </div>
-                    ))}
+                  <div className="mt-4 flex gap-3">
+                    <span className="h-10 w-10 rounded-full border border-border" style={{ backgroundColor: definition.tokens.accent }} />
+                    <span className="h-10 w-10 rounded-full border border-border" style={{ backgroundColor: definition.tokens.surface }} />
+                    <span className="h-10 w-10 rounded-full border border-border" style={{ backgroundColor: definition.tokens.error }} />
                   </div>
                 </details>
               );
@@ -493,6 +517,54 @@ function EditProfileModal({
   );
 }
 
+function ModeratorBanButton({ targetUserId }: { targetUserId: string }) {
+  const { user } = useAuth();
+  const [currentUserProfile, setCurrentUserProfile] = useState<ReturnType<typeof getDemoUserByHandle> | null>(null);
+  const [isBanning, setIsBanning] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!user) {
+      setCurrentUserProfile(null);
+      return;
+    }
+
+    return subscribeToUserProfileById(user.uid, setCurrentUserProfile);
+  }, [user]);
+
+  if (!currentUserProfile?.isModerator) {
+    return null;
+  }
+
+  return (
+    <Button
+      variant="secondary"
+      className="text-red-500"
+      disabled={isBanning}
+      onClick={async () => {
+        const confirmed = window.confirm("Ban this user? This removes their account, posts, and replies.");
+        if (!confirmed) {
+          return;
+        }
+
+        setIsBanning(true);
+        try {
+          await banUserAccount(targetUserId);
+          toast.success("User banned", { description: "The account and authored content were removed." });
+          navigate("/");
+        } catch (error) {
+          console.error("Failed to ban user", error);
+          toast.error(getFirebaseErrorMessage(error));
+        } finally {
+          setIsBanning(false);
+        }
+      }}
+    >
+      {isBanning ? "Banning..." : "Ban user"}
+    </Button>
+  );
+}
+
 export function LoginPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -622,7 +694,7 @@ export function SignupPage() {
 }
 
 export function OnboardingPage() {
-  return <PageFrame title="Onboarding" subtitle="Multi-step setup for avatar, bio, interests, accent color, and starter follows." />;
+  return <PageFrame title="Onboarding" subtitle="Coming soon. Multi-step setup for avatar, bio, interests, accent color, and starter follows." />;
 }
 
 export function PostPage() {
@@ -635,6 +707,7 @@ export function PostPage() {
   const [author, setAuthor] = useState<ReturnType<typeof getDemoUserByHandle> | null>(null);
   const [currentUserProfile, setCurrentUserProfile] = useState<ReturnType<typeof getDemoUserByHandle> | null>(null);
   const [replyAuthors, setReplyAuthors] = useState<Record<string, (typeof users)[number] | null>>({});
+  const [reactionCounts, setReactionCounts] = useState({ like: 0, fire: 0 });
 
   useEffect(() => subscribeToPosts(setPosts), []);
 
@@ -673,13 +746,19 @@ export function PostPage() {
       setReplyAuthors({});
       return;
     }
-
-    setReplyAuthors(
-      Object.fromEntries(
-        replies.map((reply) => [reply.id, users.find((profile) => profile.uid === reply.authorId) ?? null]),
-      ),
+    const unsubscribers = replies.map((reply) =>
+      subscribeToUserProfileById(reply.authorId, (profile) => {
+        setReplyAuthors((current) => ({
+          ...current,
+          [reply.id]: profile ?? users.find((candidate) => candidate.uid === reply.authorId) ?? null,
+        }));
+      }),
     );
-  }, [replies.length, post?.id]);
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [replies, post?.id]);
 
   useEffect(() => {
     if (!user || !author || author.uid === user.uid) {
@@ -688,6 +767,13 @@ export function PostPage() {
 
     return subscribeToFollowRelationship(user.uid, author.uid, setIsFollowingAuthor);
   }, [author?.uid, user?.uid]);
+
+  useEffect(() => {
+    setReactionCounts({
+      like: post?.reactionTypeCounts?.like ?? 0,
+      fire: post?.reactionTypeCounts?.fire ?? 0,
+    });
+  }, [post?.reactionTypeCounts?.fire, post?.reactionTypeCounts?.like]);
 
   return (
     <PageFrame title="Post Thread" subtitle="Thread view, nested replies, quoted repost context, and moderation actions.">
@@ -703,20 +789,34 @@ export function PostPage() {
           </div>
           <Card className="space-y-4 p-6">
             <div className="flex items-start gap-4">
-              <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} className="h-16 w-16 rounded-3xl" />
+              <button
+                type="button"
+                className="shrink-0"
+                onClick={() => {
+                  if (author) {
+                    navigate(`/profile/${author.handle}`);
+                  }
+                }}
+              >
+                <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} className="h-16 w-16 rounded-3xl" />
+              </button>
               <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-lg font-semibold">{author?.displayName ?? "Unknown profile"}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="text-left text-lg font-semibold hover:underline"
+                    onClick={() => {
+                      if (author) {
+                        navigate(`/profile/${author.handle}`);
+                      }
+                    }}
+                  >
+                    {author?.displayName ?? "Unknown profile"}
+                  </button>
                   {author ? <span className="rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-xs font-semibold text-[color:var(--accent)]">Lv {author.level}</span> : null}
-                  {author?.isModerator ? <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-semibold text-sky-500">Moderator</span> : null}
+                  {author ? <UserBadges user={author} /> : null}
                 </div>
-                <p className="text-sm text-textMuted">@{author?.handle ?? "unknown"} • {author?.location ?? "No location"}</p>
-                <p className="mt-2 text-sm text-textMuted">{author?.bio ?? "No bio available."}</p>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs text-textMuted">
-                  <span className="rounded-full border border-border px-3 py-1">{author?.followerCount ?? 0} followers</span>
-                  <span className="rounded-full border border-border px-3 py-1">{author?.followingCount ?? 0} following</span>
-                  <span className="rounded-full border border-border px-3 py-1">{author?.badgeCount ?? 0} badges</span>
-                </div>
+                <p className="text-sm text-textMuted">@{author?.handle ?? "unknown"}</p>
               </div>
               <div className="flex flex-col gap-2">
                 {author && user?.uid !== author.uid ? (
@@ -746,6 +846,18 @@ export function PostPage() {
               </div>
             </div>
             <p className="text-lg font-semibold">{post.content}</p>
+            {post.imageURL ? (
+              <img
+                src={post.imageURL}
+                alt="Post attachment"
+                className="w-full rounded-3xl border border-border object-cover"
+              />
+            ) : null}
+            <div className="flex flex-wrap gap-4 text-sm text-textMuted">
+              <span>{reactionCounts.like} likes</span>
+              <span>{reactionCounts.fire} fire</span>
+              <span>{post.replyCount} comments</span>
+            </div>
           </Card>
           <Card className="space-y-4 p-6">
             <div className="flex items-center gap-2 font-semibold">
@@ -820,18 +932,7 @@ export function PostPage() {
 }
 
 export function ChatPage() {
-  return (
-    <PageFrame title="Chat" subtitle="One-to-one conversations with unread indicators and responsive message panes.">
-      <Card className="p-6">
-        {conversations.map((conversation) => (
-          <div key={conversation.id} className="rounded-2xl border border-border p-4">
-            <p className="font-semibold">{conversation.title}</p>
-            <p className="text-sm text-textMuted">{conversation.lastMessage}</p>
-          </div>
-        ))}
-      </Card>
-    </PageFrame>
-  );
+  return <PageFrame title="Chat" subtitle="Coming soon. One-to-one conversations with unread indicators and responsive message panes." />;
 }
 
 export function NotificationsPage() {
@@ -850,7 +951,28 @@ export function NotificationsPage() {
 }
 
 export function BookmarksPage() {
-  return <PageFrame title="Bookmarks" subtitle="Private saved posts are exposed only to the authenticated user in Firebase rules." />;
+  const { user } = useAuth();
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [bookmarkedPosts, setBookmarkedPosts] = useState<Post[]>([]);
+
+  useEffect(() => subscribeToPosts(setPosts), []);
+
+  useEffect(() => {
+    if (!user) {
+      setBookmarkedPosts([]);
+      return;
+    }
+
+    return subscribeToBookmarkedPosts(user.uid, posts, setBookmarkedPosts);
+  }, [posts, user]);
+
+  return (
+    <PageFrame title="Bookmarks" subtitle="Your saved posts, synced privately to your account.">
+      {bookmarkedPosts.length ? bookmarkedPosts.map((post) => <PostCard key={post.id} post={post} />) : (
+        <Card className="p-6 text-sm text-textMuted">No bookmarks yet.</Card>
+      )}
+    </PageFrame>
+  );
 }
 
 export function ArcadePage() {
@@ -900,7 +1022,7 @@ export function ArcadePage() {
 }
 
 export function MarketPage() {
-  return <PageFrame title="Market" subtitle="Fictional collectible listings, rarity filters, inventory, and transaction history stay strictly in-app." />;
+  return <PageFrame title="Market" subtitle="Coming soon. Fictional collectible listings, rarity filters, inventory, and transaction history stay strictly in-app." />;
 }
 
 export function ShopPage() {
@@ -958,7 +1080,7 @@ export function LeaderboardPage() {
 }
 
 export function AboutPage() {
-  return <PageFrame title="About PulseArc" subtitle="PulseArc is an original social sandbox built around playful progression, healthier engagement loops, and portfolio-ready Firebase architecture." />;
+  return <PageFrame title="About PulseArc" subtitle="Coming soon. PulseArc is an original social sandbox built around playful progression, healthier engagement loops, and portfolio-ready Firebase architecture." />;
 }
 
 export function NotFoundPage() {

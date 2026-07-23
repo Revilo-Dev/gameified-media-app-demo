@@ -54,6 +54,10 @@ export function subscribeToFollowCounts(userId: string, onChange: (counts: Follo
 }
 
 export async function setFollowingRelationship(followerId: string, followingId: string, shouldFollow: boolean) {
+  if (followerId === followingId) {
+    return;
+  }
+
   const followRef = doc(db, COLLECTIONS.follows, followDocId(followerId, followingId));
   const followerRef = doc(db, COLLECTIONS.users, followerId);
   const followingRef = doc(db, COLLECTIONS.users, followingId);

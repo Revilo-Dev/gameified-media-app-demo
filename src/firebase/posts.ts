@@ -6,6 +6,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  where,
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "@/firebase/config";
@@ -26,6 +27,22 @@ function normalizeCreatedAt(value: unknown) {
 
 export function subscribeToPosts(onChange: (posts: Post[]) => void): Unsubscribe {
   const postsQuery = query(collection(db, COLLECTIONS.posts), orderBy("createdAt", "desc"), limit(50));
+
+  return onSnapshot(postsQuery, (snapshot) => {
+    onChange(
+      snapshot.docs.map((document) => ({
+        id: document.id,
+        ...({
+          ...(document.data() as Omit<Post, "id">),
+          createdAt: normalizeCreatedAt(document.data().createdAt),
+        } as Omit<Post, "id">),
+      })),
+    );
+  });
+}
+
+export function subscribeToPostsByAuthor(authorId: string, onChange: (posts: Post[]) => void): Unsubscribe {
+  const postsQuery = query(collection(db, COLLECTIONS.posts), where("authorId", "==", authorId), orderBy("createdAt", "desc"), limit(50));
 
   return onSnapshot(postsQuery, (snapshot) => {
     onChange(

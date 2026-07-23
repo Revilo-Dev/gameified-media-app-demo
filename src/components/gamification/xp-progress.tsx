@@ -1,4 +1,4 @@
-import { getXpProgress } from "@/constants/gamification";
+import { getLevelForXp, getXpProgress } from "@/constants/gamification";
 import { cn } from "@/lib/utils";
 
 interface XpProgressProps {
@@ -8,12 +8,13 @@ interface XpProgressProps {
 }
 
 export function XpProgress({ xp, level, className }: XpProgressProps) {
-  const progress = getXpProgress(xp, level);
+  const displayLevel = Math.max(level, getLevelForXp(xp));
+  const progress = getXpProgress(xp, displayLevel);
 
   return (
     <div className={cn("space-y-2", className)}>
       <div className="flex items-center justify-between text-xs text-textMuted">
-        <span>Level {level}</span>
+        <span>Level {displayLevel}</span>
         <span>
           {progress.earned}/{progress.needed} XP
         </span>

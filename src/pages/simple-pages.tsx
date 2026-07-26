@@ -254,20 +254,6 @@ export function ProfilePage() {
             ) : null}
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-3 text-sm">
-          <div className="rounded-2xl border border-border p-4">
-            <p className="text-textMuted">Posts</p>
-            <p className="mt-1 font-semibold">{user.postCount}</p>
-          </div>
-          <div className="rounded-2xl border border-border p-4">
-            <p className="text-textMuted">Badges</p>
-            <p className="mt-1 font-semibold">{user.badgeCount}</p>
-          </div>
-          <div className="rounded-2xl border border-border p-4">
-            <p className="text-textMuted">Level</p>
-            <p className="mt-1 font-semibold">{user.level}</p>
-          </div>
-        </div>
       </Card>
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Posts</h2>

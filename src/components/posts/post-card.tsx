@@ -15,6 +15,7 @@ import { useAuth } from "@/app/auth-provider";
 import { setFollowingRelationship, subscribeToFollowRelationship } from "@/firebase/follows";
 import { setPostBookmarked, subscribeToBookmarkedPostIds } from "@/firebase/bookmarks";
 import { UserBadges } from "@/components/common/user-badges";
+import { createNotification } from "@/firebase/notifications";
 
 const reactionIcons: Record<ReactionType, typeof ThumbsUp> = {
   like: ThumbsUp,
@@ -146,6 +147,16 @@ export function PostCard({ post }: { post: Post }) {
         if (user?.uid === author.uid) {
           await addGemsToUser(author.uid, 1);
         }
+        if (user?.uid && user.uid !== author.uid) {
+          await createNotification({
+            type: "reaction",
+            title: "Your post got a like",
+            body: `${currentUserProfile?.displayName ?? "Someone"} liked your post.`,
+            actorId: user.uid,
+            userId: author.uid,
+            postId: post.id,
+          });
+        }
       }
 
       if (nextReaction === "fire" && author) {
@@ -208,6 +219,16 @@ export function PostCard({ post }: { post: Post }) {
                         setIsTogglingFollow(true);
                         try {
                           await setFollowingRelationship(currentUserProfile.uid, author.uid, !isFollowed);
+                          if (!isFollowed) {
+                            await createNotification({
+                              type: "follow",
+                              title: "New follower",
+                              body: `${currentUserProfile.displayName} followed you.`,
+                              actorId: currentUserProfile.uid,
+                              userId: author.uid,
+                              postId: null,
+                            });
+                          }
                         } catch (error) {
                           console.error("Failed to toggle follow relationship", error);
                           toast.error("Follow action failed");

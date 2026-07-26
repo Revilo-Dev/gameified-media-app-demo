@@ -14,6 +14,9 @@ import { uploadPostImage } from "@/firebase/storage";
 import { useEffect, useState } from "react";
 import type { UserProfile } from "@/types/models";
 import { UserBadges } from "@/components/common/user-badges";
+import { getPostingCooldownRemainingSeconds } from "@/features/gamification/anti-abuse";
+
+const POST_COOLDOWN_STORAGE_KEY = "pulsearc-last-post-at";
 
 const postSchema = z.object({
   content: z.string().trim().min(1).max(300),
@@ -62,6 +65,16 @@ export function PostComposer() {
             return;
           }
 
+          const now = new Date();
+          const lastPostedAtRaw = window.localStorage.getItem(POST_COOLDOWN_STORAGE_KEY);
+          const lastPostedAt = lastPostedAtRaw ? new Date(lastPostedAtRaw) : null;
+          const cooldownRemaining = getPostingCooldownRemainingSeconds(lastPostedAt, now);
+
+          if (cooldownRemaining > 0) {
+            toast.error(`Wait ${cooldownRemaining}s before posting again.`);
+            return;
+          }
+
           await createPost({
             authorId: user.uid,
             content: values.content.trim(),
@@ -73,6 +86,7 @@ export function PostComposer() {
             visibility: "public",
           });
           await addXpToUser(user.uid, 5);
+          window.localStorage.setItem(POST_COOLDOWN_STORAGE_KEY, now.toISOString());
           toast.success("Post published", { description: `Posted "${values.content.slice(0, 40)}${values.content.length > 40 ? "..." : ""}"` });
           reset();
           setPendingImageURL(null);

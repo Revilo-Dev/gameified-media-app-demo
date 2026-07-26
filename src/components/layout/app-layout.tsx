@@ -1,6 +1,7 @@
 import {
   Bell,
   Bookmark,
+  Gem,
   Gamepad2,
   Home,
   Info,
@@ -23,12 +24,13 @@ import { subscribeToFollowCounts } from "@/firebase/follows";
 import { COLLECTIONS } from "@/firebase/firestore";
 import { db } from "@/firebase/config";
 import type { UserProfile } from "@/types/models";
+import { addGemsToUser, addXpToUser } from "@/firebase/users";
+import { subscribeToNotifications } from "@/firebase/notifications";
 
 const navItems = [
   { to: "/", label: "Home", icon: Home },
   { to: "/explore", label: "Explore", icon: Info },
   { to: "/chat", label: "Chat", icon: MessageSquare },
-  { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/arcade", label: "Arcade", icon: Gamepad2 },
   { to: "/market", label: "Market", icon: LayoutGrid },
   { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
@@ -39,8 +41,11 @@ export function AppLayout() {
   const navigate = useNavigate();
   const [profile, setProfile] = useState<UserProfile>(users[0]);
   const [followCounts, setFollowCounts] = useState({ followers: users[0].followerCount, following: users[0].followingCount });
+  const [notificationCount, setNotificationCount] = useState(0);
+  const [claimedToday, setClaimedToday] = useState(false);
   const profileHandle = profile.handle;
   const profilePath = `/profile/${profileHandle}`;
+  const rewardKey = "pulsearc-daily-gems";
 
   useEffect(() => {
     if (!user) {
@@ -64,6 +69,21 @@ export function AppLayout() {
 
     return subscribeToFollowCounts(user.uid, setFollowCounts);
   }, [profile.followerCount, profile.followingCount, user]);
+
+  useEffect(() => {
+    setClaimedToday(window.localStorage.getItem(rewardKey) === new Date().toDateString());
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setNotificationCount(0);
+      return;
+    }
+
+    return subscribeToNotifications(user.uid, (notifications) => {
+      setNotificationCount(notifications.filter((item) => !item.read).length);
+    });
+  }, [user]);
 
   return (
     !user ? (
@@ -99,11 +119,28 @@ export function AppLayout() {
             <p className="text-textMuted">Gems</p>
             <p className="mt-1 text-xl font-bold">{profile.gems}</p>
           </div>
-          <NavLink
-            to={profilePath}
-            className="flex items-center justify-center rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold"
+          <Button
+            variant={claimedToday ? "secondary" : "primary"}
+            disabled={claimedToday}
+            className="w-full"
+            onClick={async () => {
+              if (!user) {
+                return;
+              }
+
+              await addGemsToUser(user.uid, 10);
+              window.localStorage.setItem(rewardKey, new Date().toDateString());
+              setClaimedToday(true);
+            }}
           >
-            Edit profile
+            <Gem size={16} />
+            {claimedToday ? "Daily gems claimed" : "Redeem daily gems"}
+          </Button>
+          <NavLink to="/notifications" className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm">
+            <Bell size={16} /> Notifications
+            {notificationCount ? (
+              <span className="ml-auto rounded-full bg-[color:var(--accent)] px-2 py-0.5 text-xs font-semibold text-white">{notificationCount}</span>
+            ) : null}
           </NavLink>
           <NavLink to="/bookmarks" className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm">
             <Bookmark size={16} /> Bookmarks
@@ -111,9 +148,20 @@ export function AppLayout() {
           <NavLink to="/settings" className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm">
             <Settings size={16} /> Settings
           </NavLink>
+          {profile.isModerator ? (
+            <div className="space-y-2 rounded-2xl border border-border bg-surfaceAlt/50 p-4">
+              <p className="text-sm font-semibold">Moderator cheats</p>
+              <div className="grid grid-cols-2 gap-2">
+                <Button type="button" variant="secondary" onClick={() => void addXpToUser(profile.uid, 50)}>+50 XP</Button>
+                <Button type="button" variant="secondary" onClick={() => void addGemsToUser(profile.uid, 50)}>+50 gems</Button>
+                <Button type="button" variant="secondary" onClick={() => void addXpToUser(profile.uid, -profile.xp)}>Reset level</Button>
+                <Button type="button" variant="secondary" onClick={() => void addGemsToUser(profile.uid, -profile.gems)}>Reset gems</Button>
+              </div>
+            </div>
+          ) : null}
           <Button
             variant="ghost"
-            className="w-full"
+            className="w-full border border-[color:var(--error)] text-[color:var(--error)]"
             onClick={async () => {
               await logout();
               navigate("/login");

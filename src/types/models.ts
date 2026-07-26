@@ -21,6 +21,7 @@ export interface UserProfile {
   handle: string;
   photoURL: string | null;
   bannerURL: string | null;
+  bannerColor: string | null;
   bio: string;
   website: string;
   location: string;
@@ -67,6 +68,9 @@ export interface NotificationItem {
   type: "follow" | "reaction" | "reply" | "badge" | "level" | "reward";
   title: string;
   body: string;
+  actorId?: string | null;
+  userId?: string;
+  postId?: string | null;
   createdAt: string;
   read: boolean;
 }

@@ -101,3 +101,16 @@ export function subscribeToFollowRelationship(
     onChange(!snapshot.empty);
   });
 }
+
+export function subscribeToFollowingIds(followerId: string, onChange: (followingIds: string[]) => void): Unsubscribe {
+  const followingQuery = query(collection(db, COLLECTIONS.follows), where("followerId", "==", followerId));
+
+  return onSnapshot(followingQuery, (snapshot) => {
+    onChange(
+      snapshot.docs.map((document) => {
+        const data = document.data() as FollowRelationship;
+        return data.followingId;
+      }),
+    );
+  });
+}

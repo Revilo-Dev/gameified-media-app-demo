@@ -5,6 +5,7 @@ import { COLLECTIONS } from "@/firebase/firestore";
 import { getLevelForXp } from "@/constants/gamification";
 import type { ThemeMode, UserProfile } from "@/types/models";
 import { users as demoUsers } from "@/lib/demo-data";
+import { bannerPresets } from "@/lib/banner-presets";
 
 function buildHandle(displayName: string, uid: string) {
   return displayName.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 18) || `user${uid.slice(0, 6)}`;
@@ -26,6 +27,7 @@ export async function ensureUserProfile(user: User) {
     handle: buildHandle(displayName, user.uid),
     photoURL: user.photoURL ?? null,
     bannerURL: null,
+    bannerColor: bannerPresets[0],
     bio: "New here. Building a profile.",
     website: "",
     location: "",

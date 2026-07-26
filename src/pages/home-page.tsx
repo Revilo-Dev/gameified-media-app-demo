@@ -7,15 +7,30 @@ import type { Post } from "@/types/models";
 import { subscribeToPosts } from "@/firebase/posts";
 import { useAuth } from "@/app/auth-provider";
 import { Link } from "react-router-dom";
+import { subscribeToFollowingIds } from "@/firebase/follows";
 
 export function HomePage() {
   const { timelineTab, setTimelineTab } = useUiStore();
   const { user, isLoading } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
+  const [followingIds, setFollowingIds] = useState<string[]>([]);
 
   useEffect(() => {
     return subscribeToPosts(setPosts);
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setFollowingIds([]);
+      return;
+    }
+
+    return subscribeToFollowingIds(user.uid, setFollowingIds);
+  }, [user]);
+
+  const visiblePosts = posts
+    .filter((post) => !post.parentPostId)
+    .filter((post) => timelineTab === "for-you" || followingIds.includes(post.authorId));
 
   return (
     <div className="space-y-5">
@@ -46,9 +61,7 @@ export function HomePage() {
       ) : user ? (
         <>
           <PostComposer />
-          {posts
-            .filter((post) => !post.parentPostId)
-            .map((post) => (
+          {visiblePosts.map((post) => (
               <PostCard key={post.id} post={post} />
             ))}
         </>

@@ -58,3 +58,12 @@ export async function uploadUserImage(folder: (typeof storageFolders)[keyof type
 export async function uploadPostImage(file: File) {
   return uploadUserImage(storageFolders.posts, file);
 }
+
+export async function uploadBannerImage(file: File) {
+  const { profile } = await getSignedInUserProfile();
+  if (!profile.isPremium) {
+    throw new Error("Banner image uploads are only available for premium users.");
+  }
+
+  return uploadUserImage(storageFolders.banners, file);
+}

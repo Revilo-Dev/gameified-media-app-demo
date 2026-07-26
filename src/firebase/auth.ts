@@ -14,7 +14,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/firebase/config";
 import { updateUserProfile } from "@/firebase/users";
 import { COLLECTIONS } from "@/firebase/firestore";
-import { storageFolders, uploadUserImage } from "@/firebase/storage";
+import { storageFolders, uploadBannerImage, uploadUserImage } from "@/firebase/storage";
 
 export async function signInWithGoogle() {
   return signInWithPopup(auth, new GoogleAuthProvider());
@@ -59,6 +59,16 @@ export async function uploadProfilePicture(file: File) {
   await updateProfile(auth.currentUser, { photoURL });
   await updateUserProfile(auth.currentUser.uid, { photoURL });
   return photoURL;
+}
+
+export async function uploadProfileBanner(file: File) {
+  if (!auth.currentUser) {
+    throw new Error("No signed-in user.");
+  }
+
+  const bannerURL = await uploadBannerImage(file);
+  await updateUserProfile(auth.currentUser.uid, { bannerURL });
+  return bannerURL;
 }
 
 export async function changeUserPassword(currentPassword: string, nextPassword: string) {

@@ -8,7 +8,8 @@ import type { Post, ReactionType, UserProfile } from "@/types/models";
 import { Avatar } from "@/components/common/avatar";
 import { Card } from "@/components/common/card";
 import { Button } from "@/components/common/button";
-import { deleteDoc, doc, increment, updateDoc } from "firebase/firestore";
+import { InlineEntities } from "@/components/common/inline-entities";
+import { arrayRemove, arrayUnion, deleteDoc, doc, increment, updateDoc } from "firebase/firestore";
 import { db } from "@/firebase/config";
 import { addGemsToUser, addXpToUser, getDemoUserById, subscribeToUserProfileById } from "@/firebase/users";
 import { useAuth } from "@/app/auth-provider";
@@ -54,6 +55,9 @@ export function PostCard({ post }: { post: Post }) {
   const LikeIcon = reactionIcons.like;
   const DislikeIcon = reactionIcons.fire;
   const profilePath = author ? `/profile/${author.handle}` : "/profile/novavale";
+  const poll = post.poll ?? null;
+  const pollEnded = poll ? new Date(poll.endsAt).getTime() <= Date.now() : false;
+  const currentPollVote = poll && currentUserProfile ? poll.options.find((option) => poll.votes?.[option]?.includes(currentUserProfile.uid)) ?? null : null;
 
   useEffect(() => {
     if (!user) {
@@ -95,6 +99,23 @@ export function PostCard({ post }: { post: Post }) {
       setAuthor(profile ?? getDemoUserById(post.authorId) ?? null);
     });
   }, [post.authorId, post.id]);
+
+  async function handlePollVote(option: string) {
+    if (!poll || !currentUserProfile || pollEnded) {
+      return;
+    }
+
+    const previousChoice = poll.options.find((candidate) => poll.votes?.[candidate]?.includes(currentUserProfile.uid));
+    const updates: Record<string, unknown> = {
+      [`poll.votes.${option}`]: arrayUnion(currentUserProfile.uid),
+    };
+
+    if (previousChoice && previousChoice !== option) {
+      updates[`poll.votes.${previousChoice}`] = arrayRemove(currentUserProfile.uid);
+    }
+
+    await updateDoc(doc(db, "posts", post.id), updates);
+  }
 
   const canDeletePost = Boolean(currentUserProfile && (currentUserProfile.uid === author?.uid || currentUserProfile.isModerator));
   const bookmarkCount = useMemo(() => post.bookmarkCount, [post.bookmarkCount]);
@@ -257,13 +278,60 @@ export function PostCard({ post }: { post: Post }) {
             <span className="text-sm text-textMuted">@{author?.handle ?? "unknown"}</span>
             <span className="text-sm text-textMuted">{formatPostTime(post.createdAt)}</span>
           </div>
-          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-text">{post.content}</p>
+          <p className="mt-3 text-sm leading-6 text-text">
+            <InlineEntities text={post.content} />
+          </p>
+          {post.gifURL ? (
+            <img
+              src={post.gifURL}
+              alt="Attached GIF"
+              className="mt-4 max-h-[32rem] w-full rounded-3xl border border-border object-cover"
+            />
+          ) : null}
           {post.imageURL ? (
             <img
               src={post.imageURL}
               alt="Post attachment"
               className="mt-4 max-h-[32rem] w-full rounded-3xl border border-border object-cover"
             />
+          ) : null}
+          {poll ? (
+            <div className="mt-4 space-y-3 rounded-3xl border border-border p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-semibold">{poll.question}</p>
+                <span className="text-xs text-textMuted">{pollEnded ? "Ended" : `Ends ${formatDistanceToNow(new Date(poll.endsAt), { addSuffix: true })}`}</span>
+              </div>
+              <div className="space-y-2">
+                {poll.options.map((option) => {
+                  const voteCount = poll.votes?.[option]?.length ?? 0;
+                  const totalVotes = poll.options.reduce((count, candidate) => count + (poll.votes?.[candidate]?.length ?? 0), 0) || 1;
+                  const percentage = Math.round((voteCount / totalVotes) * 100);
+
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      disabled={pollEnded || !currentUserProfile}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handlePollVote(option);
+                      }}
+                      className={`w-full rounded-2xl border px-4 py-3 text-left text-sm transition ${
+                        currentPollVote === option ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10" : "border-border bg-surface"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span>{option}</span>
+                        <span className="text-xs text-textMuted">{voteCount} votes</span>
+                      </div>
+                      <div className="mt-2 h-2 rounded-full bg-surfaceAlt">
+                        <div className="h-full rounded-full bg-[color:var(--accent)]" style={{ width: `${percentage}%` }} />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           ) : null}
           <div className="mt-3 flex flex-wrap gap-2 text-xs text-accent">
             {post.tags.map((tag) => (

@@ -65,6 +65,8 @@ export async function createPost(input: Omit<Post, "id" | "reactionCount" | "rep
 }) {
   return addDoc(collection(db, COLLECTIONS.posts), {
     ...input,
+    gifURL: input.gifURL ?? null,
+    poll: input.poll ?? null,
     reactionCount: input.reactionCount ?? 0,
     replyCount: input.replyCount ?? 0,
     repostCount: input.repostCount ?? 0,

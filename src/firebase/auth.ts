@@ -14,7 +14,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/firebase/config";
 import { updateUserProfile } from "@/firebase/users";
 import { COLLECTIONS } from "@/firebase/firestore";
-import { storageFolders, uploadBannerImage, uploadUserImage } from "@/firebase/storage";
+import { deleteStorageObject, storageFolders, uploadBannerImage, uploadUserImage } from "@/firebase/storage";
 
 export async function signInWithGoogle() {
   return signInWithPopup(auth, new GoogleAuthProvider());
@@ -55,9 +55,9 @@ export async function uploadProfilePicture(file: File) {
   if (!auth.currentUser) {
     throw new Error("No signed-in user.");
   }
-  const photoURL = await uploadUserImage(storageFolders.avatars, file);
+  const { url: photoURL, storagePath: photoStoragePath } = await uploadUserImage(storageFolders.avatars, file);
   await updateProfile(auth.currentUser, { photoURL });
-  await updateUserProfile(auth.currentUser.uid, { photoURL });
+  await updateUserProfile(auth.currentUser.uid, { photoURL, photoStoragePath });
   return photoURL;
 }
 
@@ -66,9 +66,23 @@ export async function uploadProfileBanner(file: File) {
     throw new Error("No signed-in user.");
   }
 
-  const bannerURL = await uploadBannerImage(file);
-  await updateUserProfile(auth.currentUser.uid, { bannerURL });
+  const { url: bannerURL, storagePath: bannerStoragePath } = await uploadBannerImage(file);
+  await updateUserProfile(auth.currentUser.uid, { bannerURL, bannerStoragePath });
   return bannerURL;
+}
+
+export async function deleteProfileMedia() {
+  if (!auth.currentUser) {
+    throw new Error("No signed-in user.");
+  }
+
+  const snapshot = await getDoc(doc(db, COLLECTIONS.users, auth.currentUser.uid));
+  if (!snapshot.exists()) {
+    return;
+  }
+
+  const profile = snapshot.data() as { photoStoragePath?: string | null; bannerStoragePath?: string | null };
+  await Promise.all([deleteStorageObject(profile.photoStoragePath), deleteStorageObject(profile.bannerStoragePath)]);
 }
 
 export async function changeUserPassword(currentPassword: string, nextPassword: string) {

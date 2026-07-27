@@ -1,5 +1,5 @@
 import { doc, getDoc } from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { db, storage } from "@/firebase/config";
 import { COLLECTIONS } from "@/firebase/firestore";
 import { auth } from "@/firebase/config";
@@ -10,6 +10,11 @@ export const storageFolders = {
   banners: "banners",
   posts: "posts",
 } as const;
+
+export interface UploadedImage {
+  url: string;
+  storagePath: string;
+}
 
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 const NORMAL_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
@@ -45,14 +50,15 @@ async function getSignedInUserProfile() {
   };
 }
 
-export async function uploadUserImage(folder: (typeof storageFolders)[keyof typeof storageFolders], file: File) {
+export async function uploadUserImage(folder: (typeof storageFolders)[keyof typeof storageFolders], file: File): Promise<UploadedImage> {
   const { userId, profile } = await getSignedInUserProfile();
   const maxUploadSizeBytes = profile.isPremium ? PREMIUM_UPLOAD_SIZE_BYTES : NORMAL_UPLOAD_SIZE_BYTES;
   assertValidImageUpload(file, maxUploadSizeBytes);
   const safeFileName = file.name.replace(/\s+/g, "-");
-  const imageRef = ref(storage, `${folder}/${userId}/${Date.now()}-${safeFileName}`);
+  const storagePath = `${folder}/${userId}/${Date.now()}-${safeFileName}`;
+  const imageRef = ref(storage, storagePath);
   await uploadBytes(imageRef, file, { contentType: file.type });
-  return getDownloadURL(imageRef);
+  return { url: await getDownloadURL(imageRef), storagePath };
 }
 
 export async function uploadPostImage(file: File) {
@@ -66,4 +72,16 @@ export async function uploadBannerImage(file: File) {
   }
 
   return uploadUserImage(storageFolders.banners, file);
+}
+
+export async function deleteStorageObject(storagePath: string | null | undefined) {
+  if (!storagePath) {
+    return;
+  }
+
+  try {
+    await deleteObject(ref(storage, storagePath));
+  } catch (error) {
+    console.warn("Failed to delete storage object", { storagePath, error });
+  }
 }

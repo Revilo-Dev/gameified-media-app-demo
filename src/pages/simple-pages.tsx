@@ -20,6 +20,7 @@ import { db } from "@/firebase/config";
 import { auth } from "@/firebase/config";
 import { linkGoogleAccount, changeUserPassword, updateDisplayName, uploadProfilePicture } from "@/firebase/auth";
 import { Avatar } from "@/components/common/avatar";
+import { InlineEntities } from "@/components/common/inline-entities";
 import { setFollowingRelationship, subscribeToFollowCounts, subscribeToFollowRelationship } from "@/firebase/follows";
 import { addGemsToUser, addXpToUser, getDemoUserByHandle, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToXpLeaderboard } from "@/firebase/users";
 import { useUiStore } from "@/store/use-ui-store";
@@ -84,7 +85,9 @@ function ReplyCard({
             {author ? <UserBadges user={author} /> : null}
           </div>
           <p className="text-sm text-textMuted">@{author?.handle ?? reply.authorId}</p>
-          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-text">{reply.content}</p>
+          <p className="mt-2 text-sm leading-6 text-text">
+            <InlineEntities text={reply.content} />
+          </p>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-sm text-textMuted">
@@ -831,7 +834,9 @@ export function PostPage() {
                 ) : null}
               </div>
             </div>
-            <p className="text-lg font-semibold">{post.content}</p>
+            <p className="text-lg font-semibold leading-7 text-text">
+              <InlineEntities text={post.content} />
+            </p>
             {post.imageURL ? (
               <img
                 src={post.imageURL}
@@ -896,6 +901,8 @@ export function PostPage() {
                     authorId: user.uid,
                     content: replyText.trim(),
                     imageURL: null,
+                    imageStoragePath: null,
+                    gifURL: null,
                     parentPostId: post.id,
                     repostedPostId: null,
                     quotedPostId: null,

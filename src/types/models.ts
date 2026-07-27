@@ -20,7 +20,9 @@ export interface UserProfile {
   displayName: string;
   handle: string;
   photoURL: string | null;
+  photoStoragePath: string | null;
   bannerURL: string | null;
+  bannerStoragePath: string | null;
   bannerColor: string | null;
   bio: string;
   website: string;
@@ -50,6 +52,8 @@ export interface Post {
   authorId: string;
   content: string;
   imageURL: string | null;
+  imageStoragePath: string | null;
+  gifURL: string | null;
   parentPostId: string | null;
   repostedPostId: string | null;
   quotedPostId: string | null;
@@ -61,6 +65,12 @@ export interface Post {
   tags: string[];
   visibility: "public" | "followers";
   createdAt: string;
+  poll?: {
+    question: string;
+    options: string[];
+    votes: Record<string, string[]>;
+    endsAt: string;
+  } | null;
 }
 
 export interface NotificationItem {

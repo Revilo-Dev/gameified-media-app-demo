@@ -1,11 +1,12 @@
-import { useState, useEffect } from "react";
-import { Sparkles, Share2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Coins, Gem, Sparkles, Share2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { useAuth } from "@/app/auth-provider";
 import { createPost } from "@/firebase/posts";
-import { addXpToUser, addGemsToUser } from "@/firebase/users";
+import { addXpToUser, addGemsToUser, buyCasinoCoin, spendCasinoCoin, subscribeToUserProfileById } from "@/firebase/users";
+import type { UserProfile } from "@/types/models";
 
 const SYMBOLS = ["🍒", "🍋", "🍊", "🍌", "🎰", "💎"];
 const WINNING_COMBOS = {
@@ -17,6 +18,7 @@ const WINNING_COMBOS = {
 
 export function SlotMachine() {
   const { user } = useAuth();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [reels, setReels] = useState(["🍒", "🍋", "🍊"]);
   const [isSpinning, setIsSpinning] = useState(false);
   const [lastWin, setLastWin] = useState<{
@@ -25,39 +27,52 @@ export function SlotMachine() {
     xp: number;
     name: string;
   } | null>(null);
-  const [spinsRemaining, setSpinsRemaining] = useState(3);
-  const spinsKey = "pulsearc-slot-spins";
+  const casinoCoins = profile?.casinoCoins ?? 0;
+  const gems = profile?.gems ?? 0;
 
   useEffect(() => {
-    const today = new Date().toDateString();
-    const storedData = window.localStorage.getItem(spinsKey);
-    if (storedData) {
-      const { date, remaining } = JSON.parse(storedData);
-      if (date === today) {
-        setSpinsRemaining(remaining);
-      } else {
-        setSpinsRemaining(3);
-        window.localStorage.setItem(spinsKey, JSON.stringify({ date: today, remaining: 3 }));
-      }
-    } else {
-      window.localStorage.setItem(spinsKey, JSON.stringify({ date: today, remaining: 3 }));
+    if (!user) {
+      setProfile(null);
+      return;
     }
-  }, []);
+
+    return subscribeToUserProfileById(user.uid, setProfile);
+  }, [user]);
 
   const checkWin = (newReels: string[]): { name: string; gems: number; xp: number } | null => {
     for (const [key, combo] of Object.entries(WINNING_COMBOS)) {
-      if (JSON.stringify(newReels.sort()) === JSON.stringify(combo.symbols.sort())) {
+      if (JSON.stringify([...newReels].sort()) === JSON.stringify([...combo.symbols].sort())) {
         return { name: key, gems: combo.gems, xp: combo.xp };
       }
     }
     return null;
   };
 
+  const buyCoin = async () => {
+    if (!user || gems < 5) return;
+
+    try {
+      await buyCasinoCoin(user.uid);
+      toast.success("Casino coin bought", { description: "-5 gems, +1 casino coin" });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not buy a casino coin.");
+    }
+  };
+
   const spin = async () => {
-    if (isSpinning || spinsRemaining === 0) return;
+    if (!user || isSpinning || casinoCoins === 0) return;
 
     setIsSpinning(true);
     setLastWin(null);
+
+    try {
+      await spendCasinoCoin(user.uid);
+      toast.info("Casino coin spent", { description: "Good luck on the reels." });
+    } catch (error) {
+      setIsSpinning(false);
+      toast.error(error instanceof Error ? error.message : "You need 1 casino coin to spin.");
+      return;
+    }
 
     // Spinning animation
     for (let i = 0; i < 20; i++) {
@@ -86,11 +101,6 @@ export function SlotMachine() {
     } else {
       toast.info("Better luck next time!");
     }
-
-    const newRemaining = spinsRemaining - 1;
-    setSpinsRemaining(newRemaining);
-    const today = new Date().toDateString();
-    window.localStorage.setItem(spinsKey, JSON.stringify({ date: today, remaining: newRemaining }));
 
     setIsSpinning(false);
   };
@@ -128,7 +138,18 @@ export function SlotMachine() {
           <Sparkles className="h-5 w-5 text-yellow-500" />
           Slot Machine
         </h3>
-        <p className="mt-1 text-sm text-textMuted">Spin for prizes! {spinsRemaining} spins remaining today</p>
+        <p className="mt-1 text-sm text-textMuted">Spend 1 casino coin to spin. Casino coins cost 5 gems each.</p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-lg border border-border bg-surface px-4 py-3">
+          <p className="flex items-center gap-2 text-sm text-textMuted"><Gem className="h-4 w-4" /> Gems</p>
+          <p className="mt-1 text-xl font-bold">{gems}</p>
+        </div>
+        <div className="rounded-lg border border-border bg-surface px-4 py-3">
+          <p className="flex items-center gap-2 text-sm text-textMuted"><Coins className="h-4 w-4" /> Casino coins</p>
+          <p className="mt-1 text-xl font-bold">{casinoCoins}</p>
+        </div>
       </div>
 
       <div className="flex justify-center gap-4">
@@ -156,12 +177,21 @@ export function SlotMachine() {
 
       <div className="space-y-3">
         <Button
+          onClick={buyCoin}
+          disabled={isSpinning || gems < 5}
+          variant="secondary"
+          className="w-full gap-2"
+        >
+          <Coins className="h-4 w-4" />
+          {gems < 5 ? "Need 5 gems for a casino coin" : "Buy casino coin for 5 gems"}
+        </Button>
+        <Button
           onClick={spin}
-          disabled={isSpinning || spinsRemaining === 0}
+          disabled={isSpinning || casinoCoins === 0}
           className="w-full"
           size="lg"
         >
-          {isSpinning ? "Spinning..." : spinsRemaining === 0 ? "No spins left" : "SPIN"}
+          {isSpinning ? "Spinning..." : casinoCoins === 0 ? "Need 1 casino coin" : "SPIN"}
         </Button>
 
         {lastWin && (

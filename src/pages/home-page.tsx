@@ -1,5 +1,6 @@
 import { PostComposer } from "@/components/posts/post-composer";
 import { PostCard } from "@/components/posts/post-card";
+import { PostSkeleton } from "@/components/posts/post-skeleton";
 import { Card } from "@/components/common/card";
 import { useUiStore } from "@/store/use-ui-store";
 import { useEffect, useState } from "react";
@@ -14,9 +15,13 @@ export function HomePage() {
   const { user, isLoading } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
   const [followingIds, setFollowingIds] = useState<string[]>([]);
+  const [isPostsLoading, setIsPostsLoading] = useState(true);
 
   useEffect(() => {
-    return subscribeToPosts(setPosts);
+    return subscribeToPosts((nextPosts) => {
+      setPosts(nextPosts);
+      setIsPostsLoading(false);
+    });
   }, []);
 
   useEffect(() => {
@@ -61,7 +66,9 @@ export function HomePage() {
       ) : user ? (
         <>
           <PostComposer />
-          {visiblePosts.map((post) => (
+          {isPostsLoading ? Array.from({ length: 3 }).map((_, index) => (
+            <PostSkeleton key={`post-skeleton-${index}`} />
+          )) : visiblePosts.map((post) => (
               <PostCard key={post.id} post={post} />
             ))}
         </>

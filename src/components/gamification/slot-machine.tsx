@@ -107,7 +107,13 @@ export function SlotMachine() {
         visibility: "public",
         imageURL: null,
         imageStoragePath: null,
-      });
+        gifURL: null,
+        parentPostId: null,
+        repostedPostId: null,
+        quotedPostId: null,
+        replyToPostId: null,
+        poll: null,
+        });
       toast.success("Posted your win!");
     } catch (error) {
       toast.error("Failed to post win");

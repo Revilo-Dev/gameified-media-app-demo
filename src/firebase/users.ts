@@ -6,6 +6,7 @@ import { getLevelForXp } from "@/constants/gamification";
 import type { ThemeMode, UserProfile } from "@/types/models";
 import { users as demoUsers } from "@/lib/demo-data";
 import { bannerPresets } from "@/lib/banner-presets";
+import { readCache, writeCache } from "@/lib/persistent-cache";
 
 function buildHandle(displayName: string, uid: string) {
   return displayName.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 18) || `user${uid.slice(0, 6)}`;
@@ -140,6 +141,12 @@ export function getDemoUserByHandle(handle: string) {
 }
 
 export function subscribeToUserProfileById(userId: string, onChange: (profile: UserProfile | null) => void): Unsubscribe {
+  const cacheKey = `cache:user:${userId}`;
+  const cachedProfile = readCache<UserProfile>(cacheKey);
+  if (cachedProfile) {
+    onChange(cachedProfile);
+  }
+
   const ref = doc(db, COLLECTIONS.users, userId);
 
   return onSnapshot(ref, (snapshot) => {
@@ -149,7 +156,9 @@ export function subscribeToUserProfileById(userId: string, onChange: (profile: U
       return;
     }
 
-    onChange({ ...(snapshot.data() as UserProfile), uid: snapshot.id });
+    const nextProfile = { ...(snapshot.data() as UserProfile), uid: snapshot.id };
+    writeCache(cacheKey, nextProfile);
+    onChange(nextProfile);
   });
 }
 

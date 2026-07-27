@@ -1,56 +1,55 @@
+import { Suspense, lazy } from "react";
 import { createBrowserRouter } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
-import { HomePage } from "@/pages/home-page";
-import {
-  AboutPage,
-  ArcadePage,
-  BookmarksPage,
-  ChatPage,
-  ExplorePage,
-  LeaderboardPage,
-  LoginPage,
-  MarketPage,
-  NotFoundPage,
-  NotificationsPage,
-  OnboardingPage,
-  PostPage,
-  ProfilePage,
-  SettingsPage,
-  ShopPage,
-  SignupPage,
-} from "@/pages/simple-pages";
+
+function RouteFallback() {
+  return <div className="p-6 text-sm text-textMuted">Loading page...</div>;
+}
+
+function lazyElement<T extends Record<string, React.ComponentType>>(loader: () => Promise<T>, exportName: keyof T) {
+  const Component = lazy(async () => {
+    const module = await loader();
+    return { default: module[exportName] as React.ComponentType };
+  });
+
+  return (
+    <Suspense fallback={<RouteFallback />}>
+      <Component />
+    </Suspense>
+  );
+}
 
 export const router = createBrowserRouter([
   {
     path: "/login",
-    element: <LoginPage />,
+    element: lazyElement(() => import("@/pages/simple-pages"), "LoginPage"),
   },
   {
     path: "/signup",
-    element: <SignupPage />,
+    element: lazyElement(() => import("@/pages/simple-pages"), "SignupPage"),
   },
   {
     path: "/onboarding",
-    element: <OnboardingPage />,
+    element: lazyElement(() => import("@/pages/simple-pages"), "OnboardingPage"),
   },
   {
     path: "/",
     element: <AppLayout />,
-    errorElement: <NotFoundPage />,
+    errorElement: lazyElement(() => import("@/pages/simple-pages"), "NotFoundPage"),
     children: [
-      { index: true, element: <HomePage /> },
-      { path: "explore", element: <ExplorePage /> },
-      { path: "profile/:handle", element: <ProfilePage /> },
-      { path: "settings", element: <SettingsPage /> },
-      { path: "post/:postId", element: <PostPage /> },
-      { path: "chat", element: <ChatPage /> },
-      { path: "notifications", element: <NotificationsPage /> },
-      { path: "bookmarks", element: <BookmarksPage /> },
-      { path: "arcade", element: <ArcadePage /> },
-      { path: "market", element: <MarketPage /> },
-      { path: "shop", element: <ShopPage /> },
-      { path: "leaderboard", element: <LeaderboardPage /> },
-      { path: "about", element: <AboutPage /> },
+      { index: true, element: lazyElement(() => import("@/pages/home-page"), "HomePage") },
+      { path: "explore", element: lazyElement(() => import("@/pages/simple-pages"), "ExplorePage") },
+      { path: "profile/:handle", element: lazyElement(() => import("@/pages/simple-pages"), "ProfilePage") },
+      { path: "settings", element: lazyElement(() => import("@/pages/simple-pages"), "SettingsPage") },
+      { path: "post/:postId", element: lazyElement(() => import("@/pages/simple-pages"), "PostPage") },
+      { path: "chat", element: lazyElement(() => import("@/pages/simple-pages"), "ChatPage") },
+      { path: "notifications", element: lazyElement(() => import("@/pages/simple-pages"), "NotificationsPage") },
+      { path: "bookmarks", element: lazyElement(() => import("@/pages/simple-pages"), "BookmarksPage") },
+      { path: "arcade", element: lazyElement(() => import("@/pages/simple-pages"), "ArcadePage") },
+      { path: "market", element: lazyElement(() => import("@/pages/simple-pages"), "MarketPage") },
+      { path: "shop", element: lazyElement(() => import("@/pages/simple-pages"), "ShopPage") },
+      { path: "leaderboard", element: lazyElement(() => import("@/pages/simple-pages"), "LeaderboardPage") },
+      { path: "about", element: lazyElement(() => import("@/pages/simple-pages"), "AboutPage") },
     ],
   },
 ]);

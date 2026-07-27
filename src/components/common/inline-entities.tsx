@@ -1,6 +1,43 @@
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { subscribeToUserProfileByHandle } from "@/firebase/users";
+import type { UserProfile } from "@/types/models";
 
 const ENTITY_PATTERN = /(@[a-zA-Z0-9_]+|#[a-zA-Z0-9_]+)/g;
+
+function MentionEntity({ value }: { value: string }) {
+  const handle = value.slice(1).toLowerCase();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    return subscribeToUserProfileByHandle(handle, setProfile);
+  }, [handle, open]);
+
+  return (
+    <span className="relative inline-flex">
+      <button
+        type="button"
+        className="font-semibold text-[color:var(--accent)]"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+      >
+        {value}
+      </button>
+      {open && profile ? (
+        <span className="absolute left-0 top-6 z-20 min-w-52 rounded-2xl border border-border bg-canvas p-3 text-left shadow-panel">
+          <span className="block text-sm font-semibold text-text">{profile.displayName}</span>
+          <span className="block text-xs text-textMuted">@{profile.handle}</span>
+          <span className="mt-2 block text-xs text-textMuted">{profile.bio}</span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
 
 export function InlineEntities({
   text,
@@ -25,11 +62,11 @@ export function InlineEntities({
           return <span key={`${part}-${index}`}>{part}</span>;
         }
 
-        return (
-          <span key={`${part}-${index}`} className="font-semibold text-[color:var(--accent)]">
-            {part}
-          </span>
-        );
+        if (part.startsWith("@")) {
+          return <MentionEntity key={`${part}-${index}`} value={part} />;
+        }
+
+        return <span key={`${part}-${index}`} className="font-semibold text-[color:var(--accent)]">{part}</span>;
       })}
     </span>
   );

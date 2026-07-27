@@ -13,6 +13,8 @@ import {
 } from "firebase/firestore";
 import { db } from "@/firebase/config";
 import { COLLECTIONS } from "@/firebase/firestore";
+import { createNotification } from "@/firebase/notifications";
+import { getUserProfile } from "@/firebase/notifications";
 
 export interface FollowCounts {
   followers: number;
@@ -88,6 +90,20 @@ export async function setFollowingRelationship(followerId: string, followingId: 
     transaction.set(followerRef, { followingCount: increment(-1) }, { merge: true });
     transaction.set(followingRef, { followerCount: increment(-1) }, { merge: true });
   });
+
+  if (shouldFollow) {
+    const followerProfile = await getUserProfile(followerId);
+    if (followerProfile && followerId !== followingId) {
+      await createNotification({
+        type: "follow",
+        title: "New follower",
+        body: `${followerProfile.displayName} followed you.`,
+        actorId: followerId,
+        userId: followingId,
+        postId: null,
+      });
+    }
+  }
 }
 
 export function subscribeToFollowRelationship(

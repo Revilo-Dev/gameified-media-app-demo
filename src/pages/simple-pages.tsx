@@ -27,9 +27,10 @@ import { getXpProgress } from "@/constants/gamification";
 import { themePresets } from "@/lib/theme-presets";
 import { banUserAccount } from "@/firebase/functions";
 import { subscribeToBookmarkedPosts } from "@/firebase/bookmarks";
+import { subscribeToNotifications } from "@/firebase/notifications";
 import { UserBadges } from "@/components/common/user-badges";
 import { PostCard } from "@/components/posts/post-card";
-import type { Post } from "@/types/models";
+import type { NotificationItem, Post } from "@/types/models";
 
 function getFirebaseErrorMessage(error: unknown) {
   if (typeof error !== "object" || error === null) {
@@ -131,7 +132,7 @@ function ReplyCard({
       </div>
       <div className="flex flex-wrap items-center gap-3 text-xs text-textMuted">
         <span>{getRepliesLabel(reply.replyCount)}</span>
-        <span>{reply.reactionCount} reactions</span>
+        <span>{reply.starRatingCount} ratings</span>
         <span>{reply.repostCount} reposts</span>
         {canDelete ? (
           <Button variant="ghost" className="ml-auto gap-2 px-0 text-red-500" onClick={onDelete}>
@@ -1268,10 +1269,22 @@ export function ChatPage() {
 }
 
 export function NotificationsPage() {
+  const { user } = useAuth();
+  const [items, setItems] = useState<NotificationItem[]>([]);
+
+  useEffect(() => {
+    if (!user) {
+      setItems([]);
+      return;
+    }
+
+    return subscribeToNotifications(user.uid, setItems);
+  }, [user]);
+
   return (
     <PageFrame title="Notifications" subtitle="Reward, follow, mention, reply, and badge events with read states and filtering.">
       <Card className="space-y-3 p-6">
-        {notifications.map((item) => (
+        {(items.length ? items : notifications).map((item) => (
           <div key={item.id} className="rounded-2xl border border-border p-4">
             <p className="font-semibold">{item.title}</p>
             <p className="text-sm text-textMuted">{item.body}</p>
@@ -1308,7 +1321,6 @@ export function BookmarksPage() {
 }
 
 export function ArcadePage() {
-  const question = triviaQuestions[0];
   const { user } = useAuth();
   const [claimedToday, setClaimedToday] = useState(false);
   const rewardKey = "pulsearc-daily-gems";
@@ -1320,33 +1332,27 @@ export function ArcadePage() {
   return (
     <PageFrame title="Arcade" subtitle="Daily trivia, slot machine, one reward claim per day, and badge progress fit into a lightweight game layer.">
       <div className="space-y-5">
-        <Card className="space-y-4 p-6">
-          <div className="flex items-center justify-between gap-3">
-            <p className="font-semibold">{question.prompt}</p>
-            <Button
-              variant={claimedToday ? "secondary" : "primary"}
-              disabled={claimedToday}
-              onClick={async () => {
-                if (!user) {
-                  return;
-                }
+        <Card className="flex items-center justify-between gap-4 p-6">
+          <div>
+            <p className="font-semibold">Daily gem reward</p>
+            <p className="text-sm text-textMuted">Claim your once-per-day arcade bonus without the old trivia card.</p>
+          </div>
+          <Button
+            variant={claimedToday ? "secondary" : "primary"}
+            disabled={claimedToday}
+            onClick={async () => {
+              if (!user) {
+                return;
+              }
 
-                await addGemsToUser(user.uid, 10);
-                window.localStorage.setItem(rewardKey, new Date().toDateString());
-                setClaimedToday(true);
-                toast.success("Daily gems claimed", { description: "+10 gems added to your account" });
-              }}
-            >
-              {claimedToday ? "Claimed" : "+10 Gems"}
-            </Button>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {question.choices.map((choice) => (
-              <div key={choice} className="rounded-2xl border border-border p-4 text-sm">
-                {choice}
-              </div>
-            ))}
-          </div>
+              await addGemsToUser(user.uid, 10);
+              window.localStorage.setItem(rewardKey, new Date().toDateString());
+              setClaimedToday(true);
+              toast.success("Daily gems claimed", { description: "+10 gems added to your account" });
+            }}
+          >
+            {claimedToday ? "Claimed" : "+10 Gems"}
+          </Button>
         </Card>
         <SlotMachine />
       </div>

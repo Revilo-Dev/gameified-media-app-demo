@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import {
   Bell,
   Bookmark,
@@ -6,26 +7,31 @@ import {
   Home,
   LayoutGrid,
   MessageSquare,
+  PlusSquare,
   Search,
   Settings,
   Trophy,
+  X,
 } from "lucide-react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { Avatar } from "@/components/common/avatar";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
-import { users } from "@/lib/demo-data";
+import { PostComposer } from "@/components/posts/post-composer";
+import { XpProgress } from "@/components/gamification/xp-progress";
 import { useAuth } from "@/app/auth-provider";
 import { logout } from "@/firebase/auth";
-import { XpProgress } from "@/components/gamification/xp-progress";
-import { subscribeToFollowCounts } from "@/firebase/follows";
-import { COLLECTIONS } from "@/firebase/firestore";
 import { db } from "@/firebase/config";
-import type { UserProfile } from "@/types/models";
+import { COLLECTIONS } from "@/firebase/firestore";
+import { subscribeToFollowCounts } from "@/firebase/follows";
+import { createNotification, subscribeToNotifications } from "@/firebase/notifications";
+import { subscribeToLeaderboardRank } from "@/firebase/posts";
 import { addGemsToUser, addXpToUser } from "@/firebase/users";
-import { subscribeToNotifications } from "@/firebase/notifications";
+import { users } from "@/lib/demo-data";
+import { readCache, writeCache } from "@/lib/persistent-cache";
+import { useUiStore } from "@/store/use-ui-store";
+import type { UserProfile } from "@/types/models";
 
 const navItems = [
   { to: "/", label: "Home", icon: Home },
@@ -39,13 +45,31 @@ const navItems = [
 export function AppLayout() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { isComposerOpen, setComposerOpen } = useUiStore();
   const [profile, setProfile] = useState<UserProfile>(users[0]);
   const [followCounts, setFollowCounts] = useState({ followers: users[0].followerCount, following: users[0].followingCount });
   const [notificationCount, setNotificationCount] = useState(0);
   const [claimedToday, setClaimedToday] = useState(false);
-  const profileHandle = profile.handle;
-  const profilePath = `/profile/${profileHandle}`;
+  const previousRankRef = useRef<number | null>(null);
+  const profilePath = `/profile/${profile.handle}`;
   const rewardKey = "pulsearc-daily-gems";
+  const profileCacheKey = user ? `cache:sidebar-profile:${user.uid}` : null;
+  const followCacheKey = user ? `cache:sidebar-follows:${user.uid}` : null;
+
+  useEffect(() => {
+    if (!profileCacheKey || !followCacheKey) {
+      return;
+    }
+
+    const cachedProfile = readCache<UserProfile>(profileCacheKey);
+    const cachedFollows = readCache<{ followers: number; following: number }>(followCacheKey);
+    if (cachedProfile) {
+      setProfile(cachedProfile);
+    }
+    if (cachedFollows) {
+      setFollowCounts(cachedFollows);
+    }
+  }, [followCacheKey, profileCacheKey]);
 
   useEffect(() => {
     if (!user) {
@@ -53,10 +77,11 @@ export function AppLayout() {
       return;
     }
 
-    const ref = doc(db, COLLECTIONS.users, user.uid);
-    return onSnapshot(ref, (snapshot) => {
+    return onSnapshot(doc(db, COLLECTIONS.users, user.uid), (snapshot) => {
       if (snapshot.exists()) {
-        setProfile({ ...(snapshot.data() as UserProfile), uid: user.uid });
+        const nextProfile = { ...(snapshot.data() as UserProfile), uid: user.uid };
+        setProfile(nextProfile);
+        writeCache(`cache:sidebar-profile:${user.uid}`, nextProfile);
       }
     });
   }, [user]);
@@ -67,7 +92,10 @@ export function AppLayout() {
       return;
     }
 
-    return subscribeToFollowCounts(user.uid, setFollowCounts);
+    return subscribeToFollowCounts(user.uid, (nextCounts) => {
+      setFollowCounts(nextCounts);
+      writeCache(`cache:sidebar-follows:${user.uid}`, nextCounts);
+    });
   }, [profile.followerCount, profile.followingCount, user]);
 
   useEffect(() => {
@@ -85,134 +113,168 @@ export function AppLayout() {
     });
   }, [user]);
 
-  return (
-    !user ? (
+  useEffect(() => {
+    if (!user) {
+      previousRankRef.current = null;
+      return;
+    }
+
+    return subscribeToLeaderboardRank(user.uid, (rank) => {
+      if (rank !== null && previousRankRef.current !== null && rank < previousRankRef.current) {
+        void createNotification({
+          type: "leaderboard",
+          title: "Leaderboard climb",
+          body: `You moved from #${previousRankRef.current} to #${rank} on the leaderboard.`,
+          actorId: user.uid,
+          userId: user.uid,
+          postId: null,
+        });
+      }
+
+      previousRankRef.current = rank;
+    });
+  }, [user]);
+
+  if (!user) {
+    return (
       <div className="mx-auto grid min-h-screen max-w-lg place-items-center px-4">
         <Card className="w-full p-6">
           <p className="mb-4 text-sm text-textMuted">Sign in to continue.</p>
           <Button className="w-full" onClick={() => navigate("/login")}>Go to login</Button>
         </Card>
       </div>
-    ) : (
-    <div className="mx-auto min-h-screen max-w-7xl px-3 pb-24 pt-3 sm:px-4 sm:pb-6 lg:grid lg:grid-cols-[280px_minmax(0,1fr)_280px] lg:gap-6">
-      <aside className="sticky top-6 hidden self-start lg:block">
-        <Card className="space-y-4 p-5">
-          <Link to={profilePath} className="flex items-center gap-4 transition hover:opacity-80">
-            <Avatar name={profile.displayName} src={profile.photoURL} />
-            <div>
-              <p className="font-semibold">{profile.displayName}</p>
-              <p className="text-sm text-textMuted">@{profile.handle}</p>
-            </div>
-          </Link>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div className="rounded-2xl border border-border p-3">
-              <p className="text-textMuted">Followers</p>
-              <p className="mt-1 font-semibold">{followCounts.followers}</p>
-            </div>
-            <div className="rounded-2xl border border-border p-3">
-              <p className="text-textMuted">Following</p>
-              <p className="mt-1 font-semibold">{followCounts.following}</p>
-            </div>
-          </div>
-          <XpProgress xp={profile.xp} level={profile.level} />
-          <div className="rounded-2xl border border-border bg-surface px-4 py-3">
-            <p className="text-textMuted">Gems</p>
-            <p className="mt-1 text-xl font-bold">{profile.gems}</p>
-          </div>
-          <Button
-            variant={claimedToday ? "secondary" : "primary"}
-            disabled={claimedToday}
-            className="w-full"
-            onClick={async () => {
-              if (!user) {
-                return;
-              }
+    );
+  }
 
-              await addGemsToUser(user.uid, 10);
-              window.localStorage.setItem(rewardKey, new Date().toDateString());
-              setClaimedToday(true);
-            }}
-          >
-            <Gem size={16} />
-            {claimedToday ? "Daily gems claimed" : "Redeem daily gems"}
-          </Button>
-          <NavLink to="/notifications" className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm">
-            <Bell size={16} /> Notifications
-            {notificationCount ? (
-              <span className="ml-auto rounded-full bg-[color:var(--accent)] px-2 py-0.5 text-xs font-semibold text-white">{notificationCount}</span>
-            ) : null}
-          </NavLink>
-          <NavLink to="/bookmarks" className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm">
-            <Bookmark size={16} /> Bookmarks
-          </NavLink>
-          <NavLink to="/settings" className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm">
-            <Settings size={16} /> Settings
-          </NavLink>
-          {profile.isModerator ? (
-            <div className="space-y-2 rounded-2xl border border-border bg-surfaceAlt/50 p-4">
-              <p className="text-sm font-semibold">Moderator cheats</p>
-              <div className="grid grid-cols-2 gap-2">
-                <Button type="button" variant="secondary" onClick={() => void addXpToUser(profile.uid, 50)}>+50 XP</Button>
-                <Button type="button" variant="secondary" onClick={() => void addGemsToUser(profile.uid, 50)}>+50 gems</Button>
-                <Button type="button" variant="secondary" onClick={() => void addXpToUser(profile.uid, -profile.xp)}>Reset level</Button>
-                <Button type="button" variant="secondary" onClick={() => void addGemsToUser(profile.uid, -profile.gems)}>Reset gems</Button>
+  return (
+    <>
+      <div className="mx-auto min-h-screen max-w-7xl px-3 pb-24 pt-3 sm:px-4 sm:pb-6 lg:grid lg:grid-cols-[280px_minmax(0,1fr)_280px] lg:gap-6">
+        <aside className="sticky top-6 hidden self-start lg:block">
+          <Card className="space-y-4 p-5">
+            <Link to={profilePath} className="flex items-center gap-4 transition hover:opacity-80">
+              <Avatar name={profile.displayName} src={profile.photoURL} />
+              <div>
+                <p className="font-semibold">{profile.displayName}</p>
+                <p className="text-sm text-textMuted">@{profile.handle}</p>
               </div>
+            </Link>
+            <div className="flex flex-wrap items-center gap-2 text-sm text-textMuted">
+              <span>Following <span className="font-semibold text-text">{followCounts.following}</span></span>
+              <span>|</span>
+              <span>Followers <span className="font-semibold text-text">{followCounts.followers}</span></span>
             </div>
-          ) : null}
-          <Button
-            variant="ghost"
-            className="w-full border border-[color:var(--error)] text-[color:var(--error)]"
-            onClick={async () => {
+            <XpProgress xp={profile.xp} level={profile.level} />
+            <div className="rounded-2xl border border-border bg-surface px-4 py-3">
+              <p className="text-textMuted">Gems</p>
+              <p className="mt-1 text-xl font-bold">{profile.gems}</p>
+            </div>
+            <Button
+              variant={claimedToday ? "secondary" : "primary"}
+              disabled={claimedToday}
+              className="w-full"
+              onClick={async () => {
+                await addGemsToUser(user.uid, 10);
+                window.localStorage.setItem(rewardKey, new Date().toDateString());
+                setClaimedToday(true);
+              }}
+            >
+              <Gem size={16} />
+              {claimedToday ? "Daily gems claimed" : "Redeem daily gems"}
+            </Button>
+            <NavLink to="/notifications" className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm">
+              <Bell size={16} /> Notifications
+              {notificationCount ? <span className="ml-auto rounded-full bg-[color:var(--accent)] px-2 py-0.5 text-xs font-semibold text-white">{notificationCount}</span> : null}
+            </NavLink>
+            <NavLink to="/bookmarks" className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm">
+              <Bookmark size={16} /> Bookmarks
+            </NavLink>
+            <NavLink to="/settings" className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm">
+              <Settings size={16} /> Settings
+            </NavLink>
+            {profile.isModerator ? (
+              <div className="space-y-2 rounded-2xl border border-border bg-surfaceAlt/50 p-4">
+                <p className="text-sm font-semibold">Moderator cheats</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button type="button" variant="secondary" onClick={() => void addXpToUser(profile.uid, 50)}>+50 XP</Button>
+                  <Button type="button" variant="secondary" onClick={() => void addGemsToUser(profile.uid, 50)}>+50 gems</Button>
+                  <Button type="button" variant="secondary" onClick={() => void addXpToUser(profile.uid, -profile.xp)}>Reset level</Button>
+                  <Button type="button" variant="secondary" onClick={() => void addGemsToUser(profile.uid, -profile.gems)}>Reset gems</Button>
+                </div>
+              </div>
+            ) : null}
+            <Button variant="ghost" className="w-full border border-[color:var(--error)] text-[color:var(--error)]" onClick={async () => {
               await logout();
               navigate("/login");
-            }}
-          >
-            Sign out
-          </Button>
-        </Card>
-      </aside>
+            }}>
+              Sign out
+            </Button>
+          </Card>
+        </aside>
 
-      <main className="min-w-0 pb-6 lg:pb-0">
-        <Outlet />
-      </main>
+        <main className="min-w-0 pb-6 lg:pb-0">
+          <Outlet />
+        </main>
 
-      <aside className="sticky top-6 hidden self-start lg:block">
-        <Card className="space-y-3 p-4">
-          <Button className="w-full">Create post</Button>
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-2xl px-4 py-3 text-sm ${isActive ? "bg-accent text-white" : "bg-surfaceAlt text-text"}`
-              }
-            >
-              <item.icon size={18} />
-              {item.label}
-            </NavLink>
-          ))}
-        </Card>
-      </aside>
+        <aside className="sticky top-6 hidden self-start lg:block">
+          <Card className="space-y-3 p-4">
+            <Button className="w-full gap-2" onClick={() => setComposerOpen(true)}>
+              <PlusSquare size={16} />
+              Create post
+            </Button>
+            {navItems.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) => `flex items-center gap-3 rounded-2xl px-4 py-3 text-sm ${isActive ? "bg-accent text-white" : "bg-surfaceAlt text-text"}`}
+              >
+                <item.icon size={18} />
+                {item.label}
+              </NavLink>
+            ))}
+          </Card>
+        </aside>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-canvas/95 px-3 py-2 backdrop-blur lg:hidden">
-        <div className="mx-auto grid max-w-md grid-cols-7 gap-2">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `flex flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-medium transition ${
-                  isActive ? "bg-[color:var(--accent)] text-white shadow-lg" : "text-textMuted"
-                }`
-              }
-            >
-              <item.icon size={18} />
-              {item.label}
-            </NavLink>
-          ))}
+        <button
+          type="button"
+          className="fixed bottom-24 right-4 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-accent text-white shadow-panel lg:hidden"
+          onClick={() => setComposerOpen(true)}
+        >
+          <PlusSquare size={22} />
+        </button>
+
+        <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-canvas/95 px-3 py-2 backdrop-blur lg:hidden">
+          <div className="mx-auto grid max-w-md grid-cols-6 gap-2">
+            {navItems.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) => `flex flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-medium transition ${isActive ? "bg-[color:var(--accent)] text-white shadow-lg" : "text-textMuted"}`}
+              >
+                <item.icon size={18} />
+                {item.label}
+              </NavLink>
+            ))}
+          </div>
+        </nav>
+      </div>
+
+      {isComposerOpen ? (
+        <div className="fixed inset-0 z-50 bg-black/50 p-3 backdrop-blur-sm sm:p-6">
+          <div className="mx-auto max-w-2xl rounded-[2rem] border border-border bg-canvas p-4 shadow-panel">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Create post</h2>
+              <Button variant="ghost" size="sm" onClick={() => setComposerOpen(false)}>
+                <X size={16} />
+              </Button>
+            </div>
+            <PostComposer
+              mode="modal"
+              onPosted={() => setComposerOpen(false)}
+              onCancel={() => setComposerOpen(false)}
+            />
+          </div>
         </div>
-      </nav>
-    </div>
-    )
+      ) : null}
+    </>
   );
 }

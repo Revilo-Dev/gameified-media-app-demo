@@ -2,8 +2,6 @@ export type ThemeMode = "graphite" | "mist" | "oled" | "aurora";
 
 export type BadgeRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
 
-export type ReactionType = "like" | "fire" | "insightful" | "funny" | "gg";
-
 export type TimelineTab = "for-you" | "following";
 
 export interface BadgeDefinition {
@@ -57,11 +55,15 @@ export interface Post {
   parentPostId: string | null;
   repostedPostId: string | null;
   quotedPostId: string | null;
+  replyToPostId?: string | null;
   reactionCount: number;
   replyCount: number;
   repostCount: number;
   bookmarkCount: number;
-  reactionTypeCounts?: Partial<Record<ReactionType, number>>;
+  reactionTypeCounts?: Record<string, number>;
+  averageRating: number;
+  starRatingCount: number;
+  rottenTomatoCount: number;
   tags: string[];
   visibility: "public" | "followers";
   createdAt: string;
@@ -70,12 +72,13 @@ export interface Post {
     options: string[];
     votes: Record<string, string[]>;
     endsAt: string;
+    durationLabel: string;
   } | null;
 }
 
 export interface NotificationItem {
   id: string;
-  type: "follow" | "reaction" | "reply" | "badge" | "level" | "reward";
+  type: "follow" | "reaction" | "reply" | "badge" | "level" | "reward" | "mention" | "report" | "leaderboard";
   title: string;
   body: string;
   actorId?: string | null;

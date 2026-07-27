@@ -97,6 +97,9 @@ export const posts: Post[] = [
     replyCount: 8,
     repostCount: 5,
     bookmarkCount: 14,
+    averageRating: 4.4,
+    starRatingCount: 12,
+    rottenTomatoCount: 0,
     tags: ["product", "community"],
     visibility: "public",
     createdAt: "2026-07-15T07:12:00.000Z",
@@ -115,6 +118,9 @@ export const posts: Post[] = [
     replyCount: 2,
     repostCount: 1,
     bookmarkCount: 4,
+    averageRating: 3.8,
+    starRatingCount: 6,
+    rottenTomatoCount: 1,
     tags: ["arcade", "streaks"],
     visibility: "public",
     createdAt: "2026-07-15T04:05:00.000Z",
@@ -151,7 +157,7 @@ export const shopItems: ShopItem[] = [
 export const triviaQuestions: TriviaQuestion[] = [
   {
     id: "q1",
-    prompt: "Which reward should never be purchasable in this demo?",
+    prompt: "Which reward should remain earned instead of sold in this demo?",
     choices: ["Credits", "Achievement badges", "Themes", "Reaction packs"],
     answer: "Achievement badges",
   },

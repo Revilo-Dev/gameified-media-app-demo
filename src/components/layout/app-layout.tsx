@@ -4,9 +4,9 @@ import {
   Gem,
   Gamepad2,
   Home,
-  Info,
   LayoutGrid,
   MessageSquare,
+  Search,
   Settings,
   Trophy,
 } from "lucide-react";
@@ -29,7 +29,7 @@ import { subscribeToNotifications } from "@/firebase/notifications";
 
 const navItems = [
   { to: "/", label: "Home", icon: Home },
-  { to: "/explore", label: "Explore", icon: Info },
+  { to: "/explore", label: "Explore", icon: Search },
   { to: "/chat", label: "Chat", icon: MessageSquare },
   { to: "/arcade", label: "Arcade", icon: Gamepad2 },
   { to: "/market", label: "Market", icon: LayoutGrid },

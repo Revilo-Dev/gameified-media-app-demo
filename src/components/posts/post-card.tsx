@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
-import { Bookmark, Laugh, Lightbulb, MessageCircle, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Bookmark, Laugh, Lightbulb, MessageCircle, Sparkles, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { arrayRemove, arrayUnion, deleteDoc, doc, increment, updateDoc } from "firebase/firestore";
 import { users } from "@/lib/demo-data";
 import type { Post, ReactionType, UserProfile } from "@/types/models";
 import { Avatar } from "@/components/common/avatar";
 import { Card } from "@/components/common/card";
 import { Button } from "@/components/common/button";
 import { InlineEntities } from "@/components/common/inline-entities";
-import { arrayRemove, arrayUnion, deleteDoc, doc, increment, updateDoc } from "firebase/firestore";
 import { db } from "@/firebase/config";
 import { addGemsToUser, addXpToUser, getDemoUserById, subscribeToUserProfileById } from "@/firebase/users";
 import { useAuth } from "@/app/auth-provider";
@@ -42,7 +42,7 @@ export function PostCard({ post }: { post: Post }) {
   const [isFollowed, setIsFollowed] = useState(false);
   const [isTogglingFollow, setIsTogglingFollow] = useState(false);
   const [isBookmarked, setIsBookmarked] = useState(false);
-  const [author, setAuthor] = useState(users.find((item) => item.uid === post.authorId) ?? null);
+  const [author, setAuthor] = useState<UserProfile | null>(users.find((item) => item.uid === post.authorId) ?? null);
   const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
   const [reactionType, setReactionType] = useState<ReactionType | null>(null);
   const [reactionCounts, setReactionCounts] = useState<Record<ReactionType, number>>({
@@ -52,12 +52,11 @@ export function PostCard({ post }: { post: Post }) {
     funny: post.reactionTypeCounts?.funny ?? 0,
     gg: post.reactionTypeCounts?.gg ?? 0,
   });
-  const LikeIcon = reactionIcons.like;
-  const DislikeIcon = reactionIcons.fire;
   const profilePath = author ? `/profile/${author.handle}` : "/profile/novavale";
   const poll = post.poll ?? null;
   const pollEnded = poll ? new Date(poll.endsAt).getTime() <= Date.now() : false;
   const currentPollVote = poll && currentUserProfile ? poll.options.find((option) => poll.votes?.[option]?.includes(currentUserProfile.uid)) ?? null : null;
+  const bookmarkCount = useMemo(() => post.bookmarkCount, [post.bookmarkCount]);
 
   useEffect(() => {
     if (!user) {
@@ -116,9 +115,6 @@ export function PostCard({ post }: { post: Post }) {
 
     await updateDoc(doc(db, "posts", post.id), updates);
   }
-
-  const canDeletePost = Boolean(currentUserProfile && (currentUserProfile.uid === author?.uid || currentUserProfile.isModerator));
-  const bookmarkCount = useMemo(() => post.bookmarkCount, [post.bookmarkCount]);
 
   async function handleReact(nextReaction: ReactionType) {
     const currentReaction = reactionType;
@@ -189,114 +185,82 @@ export function PostCard({ post }: { post: Post }) {
     }
   }
 
-  return (
-    <Card className="group relative cursor-pointer p-5" onClick={() => navigate(`/post/${post.id}`)}>
-      <div className="flex gap-4">
-        <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} />
-        <div className="min-w-0 flex-1">
-          <div className="relative flex flex-wrap items-center gap-2">
-            <div className="group/name relative inline-flex items-center pb-4">
-              <button
-                type="button"
-                className="font-semibold text-left hover:underline"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  navigate(profilePath);
-                }}
-              >
-                {author?.displayName ?? "Unknown profile"}
-                {author ? (
-                  <span className="ml-2 inline-flex items-center rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--accent)]">
-                    Lv {author.level}
-                  </span>
-                ) : null}
-                {author ? <span className="ml-2 inline-flex items-center gap-1"><UserBadges user={author} /></span> : null}
-              </button>
-              <div className="pointer-events-none absolute left-0 top-full h-4 w-full" />
-              <div className="absolute left-0 top-full z-20 hidden w-72 pt-4 group-hover/name:block group-focus-within/name:block">
-                <div
-                  className="rounded-3xl border border-border bg-surface p-4 shadow-panel"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <div className="flex items-start gap-3">
-                    <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} />
-                    <div className="min-w-0">
-                      <p className="font-semibold">{author?.displayName ?? "Unknown"}</p>
-                      <p className="text-sm text-textMuted">@{author?.handle ?? "unknown"}</p>
-                      <p className="mt-2 text-sm text-textMuted">{author?.bio ?? "No bio available."}</p>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex gap-2">
-                    <Button
-                      variant={isFollowed ? "secondary" : "primary"}
-                      className="flex-1"
-                      disabled={!author || isTogglingFollow || currentUserProfile?.uid === author?.uid}
-                      onClick={async (event) => {
-                        event.stopPropagation();
-                        if (!currentUserProfile || !author) {
-                          return;
-                        }
+  const canDeletePost = Boolean(currentUserProfile && (currentUserProfile.uid === author?.uid || currentUserProfile.isModerator));
 
-                        setIsTogglingFollow(true);
-                        try {
-                          await setFollowingRelationship(currentUserProfile.uid, author.uid, !isFollowed);
-                          if (!isFollowed) {
-                            await createNotification({
-                              type: "follow",
-                              title: "New follower",
-                              body: `${currentUserProfile.displayName} followed you.`,
-                              actorId: currentUserProfile.uid,
-                              userId: author.uid,
-                              postId: null,
-                            });
-                          }
-                        } catch (error) {
-                          console.error("Failed to toggle follow relationship", error);
-                          toast.error("Follow action failed");
-                        } finally {
-                          setIsTogglingFollow(false);
-                        }
-                      }}
-                    >
-                      {currentUserProfile?.uid === author?.uid ? "You" : isTogglingFollow ? "Saving..." : isFollowed ? "Unfollow" : "Follow"}
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="flex-1"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        navigate(profilePath);
-                      }}
-                      disabled={!author}
-                    >
-                      Visit
-                    </Button>
-                  </div>
-                </div>
+  return (
+    <Card className="group relative cursor-pointer p-4 transition hover:border-[color:var(--accent)]/30" onClick={() => navigate(`/post/${post.id}`)}>
+      <div className="flex gap-3">
+        <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} className="h-11 w-11 rounded-2xl" />
+        <div className="min-w-0 flex-1 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="font-semibold text-left hover:underline"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    navigate(profilePath);
+                  }}
+                >
+                  {author?.displayName ?? "Unknown profile"}
+                </button>
+                {author ? <span className="rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--accent)]">Lv {author.level}</span> : null}
+                {author ? <UserBadges user={author} /> : null}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-textMuted">
+                <span>@{author?.handle ?? "unknown"}</span>
+                <span>{formatPostTime(post.createdAt)}</span>
               </div>
             </div>
-            <span className="text-sm text-textMuted">@{author?.handle ?? "unknown"}</span>
-            <span className="text-sm text-textMuted">{formatPostTime(post.createdAt)}</span>
+            {author && currentUserProfile?.uid !== author.uid ? (
+              <Button
+                variant={isFollowed ? "secondary" : "ghost"}
+                size="sm"
+                className="shrink-0"
+                disabled={isTogglingFollow}
+                onClick={async (event) => {
+                  event.stopPropagation();
+                  if (!currentUserProfile) {
+                    return;
+                  }
+
+                  setIsTogglingFollow(true);
+                  try {
+                    await setFollowingRelationship(currentUserProfile.uid, author.uid, !isFollowed);
+                  } catch (error) {
+                    console.error("Failed to toggle follow relationship", error);
+                    toast.error("Follow action failed");
+                  } finally {
+                    setIsTogglingFollow(false);
+                  }
+                }}
+              >
+                {isTogglingFollow ? "..." : isFollowed ? "Following" : "Follow"}
+              </Button>
+            ) : null}
           </div>
-          <p className="mt-3 text-sm leading-6 text-text">
+
+          <p className="text-sm leading-6 text-text">
             <InlineEntities text={post.content} />
           </p>
+
           {post.gifURL ? (
             <img
               src={post.gifURL}
               alt="Attached GIF"
-              className="mt-4 max-h-[32rem] w-full rounded-3xl border border-border object-cover"
+              className="max-h-[24rem] w-full rounded-3xl border border-border object-cover"
             />
           ) : null}
           {post.imageURL ? (
             <img
               src={post.imageURL}
               alt="Post attachment"
-              className="mt-4 max-h-[32rem] w-full rounded-3xl border border-border object-cover"
+              className="max-h-[24rem] w-full rounded-3xl border border-border object-cover"
             />
           ) : null}
           {poll ? (
-            <div className="mt-4 space-y-3 rounded-3xl border border-border p-4">
+            <div className="space-y-3 rounded-3xl border border-border bg-surfaceAlt/30 p-4">
               <div className="flex items-center justify-between gap-3">
                 <p className="font-semibold">{poll.question}</p>
                 <span className="text-xs text-textMuted">{pollEnded ? "Ended" : `Ends ${formatDistanceToNow(new Date(poll.endsAt), { addSuffix: true })}`}</span>
@@ -333,45 +297,48 @@ export function PostCard({ post }: { post: Post }) {
               </div>
             </div>
           ) : null}
-          <div className="mt-3 flex flex-wrap gap-2 text-xs text-accent">
+
+          <div className="flex flex-wrap gap-2 text-xs text-accent">
             {post.tags.map((tag) => (
               <span key={tag}>#{tag}</span>
             ))}
           </div>
-          <div className="mt-4 flex items-center gap-4 text-textMuted">
+
+          <div className="flex flex-wrap items-center gap-1 text-textMuted">
+            {(Object.keys(reactionIcons) as ReactionType[]).map((type) => {
+              const Icon = reactionIcons[type];
+              return (
+                <Button
+                  key={type}
+                  variant="ghost"
+                  size="sm"
+                  className={`gap-2 ${reactionType === type ? "text-accent" : ""}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void handleReact(type);
+                  }}
+                >
+                  <Icon size={15} />
+                  {reactionCounts[type]}
+                </Button>
+              );
+            })}
             <Button
               variant="ghost"
-              className="gap-2 px-0"
-              onClick={(event) => {
-                event.stopPropagation();
-                handleReact("like");
-              }}
-            >
-              <LikeIcon size={16} /> {reactionCounts.like}
-            </Button>
-            <Button
-              variant="ghost"
-              className="gap-2 px-0"
-              onClick={(event) => {
-                event.stopPropagation();
-                handleReact("fire");
-              }}
-            >
-              <DislikeIcon size={16} /> {reactionCounts.fire}
-            </Button>
-            <Button
-              variant="ghost"
-              className="gap-2 px-0"
+              size="sm"
+              className="gap-2"
               onClick={(event) => {
                 event.stopPropagation();
                 navigate(`/post/${post.id}`);
               }}
             >
-              <MessageCircle size={16} /> {post.replyCount}
+              <MessageCircle size={15} />
+              {post.replyCount}
             </Button>
             <Button
               variant="ghost"
-              className={`gap-2 px-0 ${isBookmarked ? "text-amber-400" : ""}`}
+              size="sm"
+              className={`gap-2 ${isBookmarked ? "text-amber-400" : ""}`}
               onClick={async (event) => {
                 event.stopPropagation();
                 if (!user) {
@@ -388,18 +355,20 @@ export function PostCard({ post }: { post: Post }) {
                 }
               }}
             >
-              <Bookmark size={16} fill={isBookmarked ? "currentColor" : "none"} /> {bookmarkCount}
+              <Bookmark size={15} fill={isBookmarked ? "currentColor" : "none"} />
+              {bookmarkCount}
             </Button>
             {canDeletePost ? (
               <Button
                 variant="ghost"
-                className="gap-2 px-0 text-red-500"
+                size="sm"
+                className="ml-auto gap-2 text-red-500"
                 onClick={async (event) => {
                   event.stopPropagation();
                   await deleteDoc(doc(db, "posts", post.id));
                 }}
               >
-                Delete
+                <Trash2 size={15} />
               </Button>
             ) : null}
           </div>

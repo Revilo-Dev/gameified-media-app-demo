@@ -57,15 +57,25 @@ export function subscribeToPostsByAuthor(authorId: string, onChange: (posts: Pos
   });
 }
 
-export async function createPost(input: Omit<Post, "id" | "reactionCount" | "replyCount" | "repostCount" | "bookmarkCount" | "createdAt"> & {
+type CreatePostInput = Omit<Post, "id" | "reactionCount" | "replyCount" | "repostCount" | "bookmarkCount" | "createdAt" | "gifURL" | "parentPostId" | "repostedPostId" | "quotedPostId" | "poll"> & {
+  gifURL?: Post["gifURL"];
+  parentPostId?: Post["parentPostId"];
+  repostedPostId?: Post["repostedPostId"];
+  quotedPostId?: Post["quotedPostId"];
+  poll?: Post["poll"];
   reactionCount?: number;
   replyCount?: number;
   repostCount?: number;
   bookmarkCount?: number;
-}) {
+};
+
+export async function createPost(input: CreatePostInput) {
   return addDoc(collection(db, COLLECTIONS.posts), {
     ...input,
     gifURL: input.gifURL ?? null,
+    parentPostId: input.parentPostId ?? null,
+    repostedPostId: input.repostedPostId ?? null,
+    quotedPostId: input.quotedPostId ?? null,
     poll: input.poll ?? null,
     reactionCount: input.reactionCount ?? 0,
     replyCount: input.replyCount ?? 0,

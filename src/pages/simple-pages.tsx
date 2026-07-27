@@ -1,38 +1,35 @@
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
+import { Bookmark, Crown, Gem, Globe2, ImagePlus, Lock, MapPin, MessageCircle, Palette, Search, Trash2, Unlock } from "lucide-react";
+import { deleteDoc, doc, increment, updateDoc } from "firebase/firestore";
+import { auth, db } from "@/firebase/config";
 import { Card } from "@/components/common/card";
 import { Button } from "@/components/common/button";
 import { XpProgress } from "@/components/gamification/xp-progress";
 import { SlotMachine } from "@/components/gamification/slot-machine";
-import { conversations, notifications, shopItems, triviaQuestions, users } from "@/lib/demo-data";
+import { notifications, shopItems, triviaQuestions, users } from "@/lib/demo-data";
+import { bannerPresets } from "@/lib/banner-presets";
 import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/auth";
 import { useAuth } from "@/app/auth-provider";
-import { ensureUserProfile } from "@/firebase/users";
-import { createPost, subscribeToPosts } from "@/firebase/posts";
-import type { Post } from "@/types/models";
-import { Bookmark, Crown, MessageCircle, Palette } from "lucide-react";
-import { doc, increment, updateDoc } from "firebase/firestore";
-import { db } from "@/firebase/config";
-import { auth } from "@/firebase/config";
-import { linkGoogleAccount, changeUserPassword, updateDisplayName, uploadProfilePicture } from "@/firebase/auth";
-import { Avatar } from "@/components/common/avatar";
+import { addGemsToUser, addXpToUser, ensureUserProfile, getDemoUserByHandle, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
+import { changeUserPassword, linkGoogleAccount, updateDisplayName, uploadProfileBanner, uploadProfilePicture } from "@/firebase/auth";
+import { createPost, subscribeToPosts, subscribeToPostsByAuthor } from "@/firebase/posts";
 import { InlineEntities } from "@/components/common/inline-entities";
+import { Avatar } from "@/components/common/avatar";
 import { setFollowingRelationship, subscribeToFollowCounts, subscribeToFollowRelationship } from "@/firebase/follows";
-import { addGemsToUser, addXpToUser, getDemoUserByHandle, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToXpLeaderboard } from "@/firebase/users";
 import { useUiStore } from "@/store/use-ui-store";
 import { getXpProgress } from "@/constants/gamification";
-import { deleteDoc } from "firebase/firestore";
 import { themePresets } from "@/lib/theme-presets";
 import { banUserAccount } from "@/firebase/functions";
-import { subscribeToPostsByAuthor } from "@/firebase/posts";
 import { subscribeToBookmarkedPosts } from "@/firebase/bookmarks";
 import { UserBadges } from "@/components/common/user-badges";
 import { PostCard } from "@/components/posts/post-card";
+import type { Post } from "@/types/models";
 
 function getFirebaseErrorMessage(error: unknown) {
   if (typeof error !== "object" || error === null) {
@@ -43,17 +40,53 @@ function getFirebaseErrorMessage(error: unknown) {
   return `${firebaseError.code ?? "unknown-code"}: ${firebaseError.message ?? "Unknown Firebase error."}`;
 }
 
-function PageFrame({ title, subtitle, children }: { title: string; subtitle: string; children?: ReactNode }) {
+function PageFrame({ title, subtitle, children, titleIcon: TitleIcon }: { title: string; subtitle: string; children?: ReactNode; titleIcon?: typeof Search }) {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-semibold">{title}</h1>
+        <div className="flex items-center gap-2">
+          {TitleIcon ? <TitleIcon size={20} className="text-textMuted" /> : null}
+          <h1 className="text-2xl font-semibold">{title}</h1>
+        </div>
         <p className="mt-1 text-sm text-textMuted">{subtitle}</p>
       </div>
       {children}
     </div>
   );
 }
+
+function formatBannerStyle(profile: { bannerURL: string | null; bannerColor: string | null }) {
+  if (profile.bannerURL) {
+    return {
+      backgroundImage: `linear-gradient(180deg, rgba(7,10,16,0.06), rgba(7,10,16,0.72)), url(${profile.bannerURL})`,
+      backgroundSize: "cover",
+      backgroundPosition: "center",
+    };
+  }
+
+  return {
+    background: profile.bannerColor ?? bannerPresets[0],
+  };
+}
+
+function getRepliesLabel(count: number) {
+  return `${count} ${count === 1 ? "reply" : "replies"}`;
+}
+
+const changelogEntries = [
+  {
+    version: "V0.5",
+    date: "July 27, 2026",
+    items: [
+      "Profile headers now use a banner-first layout with inline follow or edit actions, bio placement inside the card, leaderboard rank, and gem totals.",
+      "Profiles now split activity into Posts and Replies tabs, including reply context showing who each reply was written to.",
+      "Profile editing now supports bio, banner image upload for premium users, five banner color presets for non-premium users, privacy mode, and location updates.",
+      "Explore now uses search-first iconography to better match discovery behavior.",
+      "Post cards and thread layouts were compacted and cleaned up, with richer media support for images, GIFs, polls, and visible reaction icons.",
+      "Delete actions now use trash-can iconography across profile and thread surfaces.",
+    ],
+  },
+];
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -67,41 +100,42 @@ const signupSchema = loginSchema.extend({
 function ReplyCard({
   reply,
   author,
+  parentAuthor,
   canDelete,
   onDelete,
 }: {
   reply: Post;
   author: (typeof users)[number] | null;
+  parentAuthor: (typeof users)[number] | null;
   canDelete: boolean;
   onDelete: () => Promise<void>;
 }) {
   return (
-    <Card className="space-y-4 p-5">
-      <div className="flex items-start gap-4">
-        <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} className="h-12 w-12 rounded-2xl" />
+    <Card className="space-y-3 p-4">
+      <div className="flex items-start gap-3">
+        <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} className="h-10 w-10 rounded-2xl" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-semibold">{author?.displayName ?? "Unknown profile"}</p>
             {author ? <span className="rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--accent)]">Lv {author.level}</span> : null}
             {author ? <UserBadges user={author} /> : null}
           </div>
-          <p className="text-sm text-textMuted">@{author?.handle ?? reply.authorId}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-textMuted">
+            <span>@{author?.handle ?? reply.authorId}</span>
+            {parentAuthor ? <span>Replying to @{parentAuthor.handle}</span> : null}
+          </div>
           <p className="mt-2 text-sm leading-6 text-text">
             <InlineEntities text={reply.content} />
           </p>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2 text-sm text-textMuted">
-        <span>{reply.replyCount} replies</span>
+      <div className="flex flex-wrap items-center gap-3 text-xs text-textMuted">
+        <span>{getRepliesLabel(reply.replyCount)}</span>
         <span>{reply.reactionCount} reactions</span>
         <span>{reply.repostCount} reposts</span>
         {canDelete ? (
-          <Button
-            variant="ghost"
-            className="ml-auto px-0 text-red-500"
-            onClick={onDelete}
-          >
-            Delete
+          <Button variant="ghost" className="ml-auto gap-2 px-0 text-red-500" onClick={onDelete}>
+            <Trash2 size={14} />
           </Button>
         ) : null}
       </div>
@@ -111,7 +145,7 @@ function ReplyCard({
 
 export function ExplorePage() {
   return (
-    <PageFrame title="Explore" subtitle="Search, trends, suggested users, and popular posts are composed into one discovery surface for the demo.">
+    <PageFrame title="Explore" subtitle="Search, trends, suggested users, and popular posts are composed into one discovery surface for the demo." titleIcon={Search}>
       <Card className="p-6">
         <div className="grid gap-4 md:grid-cols-2">
           <div>
@@ -137,8 +171,13 @@ export function ProfilePage() {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [followCounts, setFollowCounts] = useState({ followers: user?.followerCount ?? 0, following: user?.followingCount ?? 0 });
   const [isFollowing, setIsFollowing] = useState(false);
+  const [followsViewer, setFollowsViewer] = useState(false);
   const [isTogglingFollow, setIsTogglingFollow] = useState(false);
-  const [userPosts, setUserPosts] = useState<Post[]>([]);
+  const [allUserPosts, setAllUserPosts] = useState<Post[]>([]);
+  const [allPosts, setAllPosts] = useState<Post[]>([]);
+  const [profileTab, setProfileTab] = useState<"posts" | "replies">("posts");
+  const [leaderboardRank, setLeaderboardRank] = useState<number | null>(null);
+  const [parentAuthors, setParentAuthors] = useState<Record<string, (typeof users)[number] | null>>({});
 
   useEffect(() => {
     if (!handle) {
@@ -169,28 +208,64 @@ export function ProfilePage() {
     setFollowCounts({ followers: user.followerCount, following: user.followingCount });
 
     if (!currentUserId || user.uid === currentUserId) {
+      setIsFollowing(false);
+      setFollowsViewer(false);
       return;
     }
 
     const unsubscribeCounts = subscribeToFollowCounts(user.uid, setFollowCounts);
     const unsubscribeRelationship = subscribeToFollowRelationship(currentUserId, user.uid, setIsFollowing);
+    const unsubscribeReverse = subscribeToFollowRelationship(user.uid, currentUserId, setFollowsViewer);
 
     return () => {
       unsubscribeCounts();
       unsubscribeRelationship();
+      unsubscribeReverse();
     };
   }, [currentUserId, user?.followingCount, user?.followerCount, user?.uid]);
 
   useEffect(() => {
     if (!user?.uid) {
-      setUserPosts([]);
+      setAllUserPosts([]);
       return;
     }
 
-    return subscribeToPostsByAuthor(user.uid, (posts) => {
-      setUserPosts(posts.filter((post) => !post.parentPostId));
+    return subscribeToPostsByAuthor(user.uid, setAllUserPosts);
+  }, [user?.uid]);
+
+  useEffect(() => subscribeToPosts(setAllPosts), []);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setLeaderboardRank(null);
+      return;
+    }
+
+    return subscribeToXpLeaderboard((leaders) => {
+      const rank = leaders.findIndex((leader) => leader.uid === user.uid);
+      setLeaderboardRank(rank >= 0 ? rank + 1 : null);
     });
   }, [user?.uid]);
+
+  const userPosts = useMemo(() => allUserPosts.filter((post) => !post.parentPostId), [allUserPosts]);
+  const userReplies = useMemo(() => allUserPosts.filter((post) => Boolean(post.parentPostId)), [allUserPosts]);
+  const isMutual = isFollowing && followsViewer;
+  const canViewPosts = !user?.isPrivate || isOwnProfile || isMutual;
+
+  useEffect(() => {
+    if (!userReplies.length) {
+      setParentAuthors({});
+      return;
+    }
+
+    const nextParentAuthors = userReplies.reduce<Record<string, (typeof users)[number] | null>>((accumulator, reply) => {
+      const parentPost = allPosts.find((candidate) => candidate.id === reply.parentPostId);
+      accumulator[reply.id] = parentPost ? users.find((candidate) => candidate.uid === parentPost.authorId) ?? null : null;
+      return accumulator;
+    }, {});
+
+    setParentAuthors(nextParentAuthors);
+  }, [allPosts, userReplies]);
 
   if (!user) {
     return (
@@ -201,72 +276,145 @@ export function ProfilePage() {
   }
 
   return (
-    <PageFrame title={user.displayName} subtitle={user.bio}>
-      <Card className="space-y-5 p-6">
-        <div className="flex items-start gap-4">
-          <Avatar name={user.displayName} src={user.photoURL} className="h-20 w-20 rounded-3xl" />
-          <div className="min-w-0 flex-1">
-            <p className="text-2xl font-bold">{user.displayName}</p>
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-textMuted">
-              <span>@{user.handle}</span>
-              <UserBadges user={user} />
-              {user.location ? <span>{user.location}</span> : null}
-            </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-[auto_minmax(0,1fr)] md:items-center">
-              <div className="flex flex-wrap gap-3 text-sm">
-                <span className="rounded-2xl border border-border px-3 py-2">
-                  <strong>{followCounts.followers}</strong> Followers
-                </span>
-                <span className="rounded-2xl border border-border px-3 py-2">
-                  <strong>{followCounts.following}</strong> Following
-                </span>
+    <div className="space-y-5">
+      <Card className="overflow-hidden p-0">
+        <div className="h-36 w-full sm:h-44" style={formatBannerStyle(user)} />
+        <div className="space-y-4 p-5 sm:p-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div className="flex items-end gap-4">
+              <div className="-mt-16 shrink-0 rounded-[1.75rem] border-4 border-canvas bg-canvas sm:-mt-20">
+                <Avatar name={user.displayName} src={user.photoURL} className="h-20 w-20 rounded-3xl sm:h-24 sm:w-24" />
               </div>
-              <XpProgress xp={user.xp} level={user.level} />
+              <div className="min-w-0 pb-1">
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="text-2xl font-bold">{user.displayName}</p>
+                  <Button
+                    variant={isOwnProfile || isFollowing ? "secondary" : "primary"}
+                    className="h-9"
+                    disabled={isTogglingFollow}
+                    onClick={() => {
+                      if (isOwnProfile) {
+                        setIsEditorOpen(true);
+                        return;
+                      }
+                      if (!currentUserId) {
+                        return;
+                      }
+                      void (async () => {
+                        setIsTogglingFollow(true);
+                        try {
+                          await setFollowingRelationship(currentUserId, user.uid, !isFollowing);
+                        } catch (error) {
+                          console.error("Failed to toggle follow relationship", error);
+                          toast.error("Follow action failed");
+                        } finally {
+                          setIsTogglingFollow(false);
+                        }
+                      })();
+                    }}
+                  >
+                    {isOwnProfile ? "Edit profile" : isTogglingFollow ? "Saving..." : isFollowing ? "Following" : "Follow"}
+                  </Button>
+                  {currentUserId && !isOwnProfile ? <ModeratorBanButton targetUserId={user.uid} /> : null}
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-textMuted">
+                  <span>@{user.handle}</span>
+                  <UserBadges user={user} />
+                  {user.location ? (
+                    <span className="inline-flex items-center gap-1">
+                      <MapPin size={14} />
+                      {user.location}
+                    </span>
+                  ) : null}
+                  {user.isPrivate ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-1 text-xs">
+                      <Lock size={12} />
+                      Private
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-sm sm:min-w-[18rem]">
+              <div className="rounded-2xl border border-border bg-surfaceAlt/50 px-3 py-2">
+                <p className="text-xs text-textMuted">Leaderboard</p>
+                <p className="mt-1 font-semibold">{leaderboardRank ? `#${leaderboardRank}` : "Unranked"}</p>
+              </div>
+              <div className="rounded-2xl border border-border bg-surfaceAlt/50 px-3 py-2">
+                <p className="text-xs text-textMuted">Gems</p>
+                <p className="mt-1 inline-flex items-center gap-1 font-semibold"><Gem size={14} /> {user.gems}</p>
+              </div>
             </div>
           </div>
-        </div>
-        <div className="flex justify-end">
-          <div className="flex flex-wrap justify-end gap-3">
-            <Button
-              variant="secondary"
-              disabled={isTogglingFollow}
-              onClick={() => {
-                if (isOwnProfile) {
-                  setIsEditorOpen(true);
-                  return;
-                }
-                if (!currentUserId) {
-                  return;
-                }
-                void (async () => {
-                  setIsTogglingFollow(true);
-                  try {
-                    await setFollowingRelationship(currentUserId, user.uid, !isFollowing);
-                  } catch (error) {
-                    console.error("Failed to toggle follow relationship", error);
-                    toast.error("Follow action failed");
-                  } finally {
-                    setIsTogglingFollow(false);
-                  }
-                })();
-              }}
-            >
-              {isOwnProfile ? "Edit profile" : isTogglingFollow ? "Saving..." : isFollowing ? "Unfollow" : "Follow"}
-            </Button>
-            {currentUserId && !isOwnProfile ? (
-              <ModeratorBanButton targetUserId={user.uid} />
-            ) : null}
+
+          <p className="text-sm leading-6 text-text">{user.bio || "No bio added yet."}</p>
+
+          <div className="grid gap-3 md:grid-cols-[auto_minmax(0,1fr)] md:items-center">
+            <div className="flex flex-wrap gap-3 text-sm">
+              <span className="rounded-2xl border border-border px-3 py-2">
+                <strong>{followCounts.followers}</strong> Followers
+              </span>
+              <span className="rounded-2xl border border-border px-3 py-2">
+                <strong>{followCounts.following}</strong> Following
+              </span>
+            </div>
+            <XpProgress xp={user.xp} level={user.level} />
           </div>
         </div>
       </Card>
+
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Posts</h2>
-        {userPosts.length ? userPosts.map((post) => <PostCard key={post.id} post={post} />) : (
-          <Card className="p-6 text-sm text-textMuted">No posts yet.</Card>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setProfileTab("posts")}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${profileTab === "posts" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
+          >
+            Posts {userPosts.length}
+          </button>
+          <button
+            type="button"
+            onClick={() => setProfileTab("replies")}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${profileTab === "replies" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
+          >
+            Replies {userReplies.length}
+          </button>
+        </div>
+
+        {!canViewPosts ? (
+          <Card className="space-y-2 p-6 text-sm text-textMuted">
+            <p className="inline-flex items-center gap-2 font-semibold text-text"><Lock size={16} /> Private profile</p>
+            <p>Only mutual follows can view this user&apos;s posts and replies.</p>
+          </Card>
+        ) : profileTab === "posts" ? (
+          userPosts.length ? userPosts.map((post) => <PostCard key={post.id} post={post} />) : (
+            <Card className="p-6 text-sm text-textMuted">No posts yet.</Card>
+          )
+        ) : userReplies.length ? (
+          <div className="space-y-3">
+            {userReplies.map((reply) => (
+              <ReplyCard
+                key={reply.id}
+                reply={reply}
+                author={user}
+                parentAuthor={parentAuthors[reply.id] ?? null}
+                canDelete={isOwnProfile}
+                onDelete={async () => {
+                  await deleteDoc(doc(db, "posts", reply.id));
+                  if (reply.parentPostId) {
+                    await updateDoc(doc(db, "posts", reply.parentPostId), { replyCount: increment(-1) });
+                  }
+                }}
+              />
+            ))}
+          </div>
+        ) : (
+          <Card className="p-6 text-sm text-textMuted">No replies yet.</Card>
         )}
       </section>
+
       {isOwnProfile ? <EditProfileModal open={isEditorOpen} onClose={() => setIsEditorOpen(false)} profile={user} /> : null}
-    </PageFrame>
+    </div>
   );
 }
 
@@ -275,7 +423,7 @@ export function SettingsPage() {
   const availableThemes = Object.entries(themePresets);
 
   return (
-    <PageFrame title="Settings" subtitle="Appearance and account options live here.">
+    <PageFrame title="Settings" subtitle="Appearance, account controls, and release notes live here.">
       <div className="space-y-5">
         <Card className="space-y-4 p-6">
           <div className="flex items-center gap-2">
@@ -336,11 +484,30 @@ export function SettingsPage() {
 
         <Card className="space-y-4 p-6">
           <h2 className="text-lg font-semibold">Account</h2>
-          <p className="text-sm text-textMuted">Profile and connection tools stay in the main profile flow.</p>
+          <p className="text-sm text-textMuted">Profile, privacy, and media settings are now managed from the profile editor.</p>
           <div className="flex flex-wrap gap-3">
             <Button variant="secondary">Manage profile</Button>
             <Button variant="secondary">Privacy</Button>
             <Button variant="secondary">Notifications</Button>
+          </div>
+        </Card>
+
+        <Card className="space-y-4 p-6">
+          <h2 className="text-lg font-semibold">Changelog</h2>
+          <div className="space-y-4">
+            {changelogEntries.map((entry) => (
+              <div key={entry.version} className="rounded-3xl border border-border bg-surfaceAlt/40 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-lg font-semibold">{entry.version}</p>
+                  <span className="text-sm text-textMuted">{entry.date}</span>
+                </div>
+                <div className="mt-3 space-y-2 text-sm text-textMuted">
+                  {entry.items.map((item) => (
+                    <p key={item}>• {item}</p>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </Card>
       </div>
@@ -375,134 +542,273 @@ function EditProfileModal({
   profile: (typeof users)[number];
 }) {
   const [displayName, setDisplayName] = useState(profile.displayName);
+  const [bio, setBio] = useState(profile.bio);
+  const [location, setLocation] = useState(profile.location);
+  const [bannerColor, setBannerColor] = useState(profile.bannerColor ?? bannerPresets[0]);
+  const [isPrivate, setIsPrivate] = useState(profile.isPrivate);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [nextPassword, setNextPassword] = useState("");
 
   useEffect(() => {
     if (open) {
       setDisplayName(profile.displayName);
+      setBio(profile.bio);
+      setLocation(profile.location);
+      setBannerColor(profile.bannerColor ?? bannerPresets[0]);
+      setIsPrivate(profile.isPrivate);
     }
-  }, [open, profile.displayName]);
+  }, [open, profile.bannerColor, profile.bio, profile.displayName, profile.isPrivate, profile.location]);
 
   if (!open) {
     return null;
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 px-4">
-      <Card className="w-full max-w-xl space-y-5 p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-bold">Edit profile</h2>
-            <p className="text-sm text-textMuted">Update your profile picture, display name, Google link, and password.</p>
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-8">
+      <div className="mx-auto max-w-4xl">
+        <Card className="space-y-6 p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-bold">Edit profile</h2>
+              <p className="text-sm text-textMuted">Update your profile details, banner, privacy, and account settings from one cleaner editor.</p>
+            </div>
+            <Button variant="ghost" onClick={onClose}>Close</Button>
           </div>
-          <Button variant="ghost" onClick={onClose}>Close</Button>
-        </div>
 
-        <div className="flex items-center gap-4">
-          <Avatar name={profile.displayName} src={profile.photoURL} />
-          <div className="space-y-2">
-            <input
-              type="file"
-              accept="image/*"
-              onChange={async (event) => {
-                const file = event.target.files?.[0];
-                if (!file) {
-                  return;
-                }
+          <div className="grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
+            <div className="space-y-5">
+              <Card className="space-y-4 p-5">
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold">Profile preview</p>
+                  <div className="overflow-hidden rounded-[1.75rem] border border-border">
+                    <div className="h-28" style={formatBannerStyle({ bannerURL: profile.bannerURL, bannerColor })} />
+                    <div className="space-y-3 p-4">
+                      <div className="flex items-end gap-3">
+                        <div className="-mt-12 rounded-[1.25rem] border-4 border-canvas bg-canvas">
+                          <Avatar name={displayName} src={profile.photoURL} className="h-16 w-16 rounded-3xl" />
+                        </div>
+                        <div>
+                          <p className="font-semibold">{displayName || "Display name"}</p>
+                          <p className="text-sm text-textMuted">@{profile.handle}</p>
+                        </div>
+                      </div>
+                      <p className="text-sm text-textMuted">{bio || "Your bio will show here."}</p>
+                    </div>
+                  </div>
+                </div>
 
-                try {
-                  await uploadProfilePicture(file);
-                  toast.success("Profile picture updated");
-                } catch (error) {
-                  console.error("Failed to update profile picture", error);
-                  toast.error(getFirebaseErrorMessage(error));
-                }
-              }}
-            />
-            <p className="text-xs text-textMuted">Upload a new profile picture.</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="block text-sm font-semibold">Display name</label>
+                    <input
+                      value={displayName}
+                      onChange={(event) => setDisplayName(event.target.value)}
+                      className="w-full rounded-2xl border border-border bg-transparent px-4 py-3 text-sm outline-none"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-sm font-semibold">Location</label>
+                    <input
+                      value={location}
+                      onChange={(event) => setLocation(event.target.value)}
+                      placeholder="City, country, or remote"
+                      className="w-full rounded-2xl border border-border bg-transparent px-4 py-3 text-sm outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold">Bio</label>
+                  <textarea
+                    value={bio}
+                    onChange={(event) => setBio(event.target.value)}
+                    rows={4}
+                    maxLength={180}
+                    placeholder="Tell people what you're about."
+                    className="w-full rounded-3xl border border-border bg-transparent px-4 py-3 text-sm outline-none"
+                  />
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold">Profile visibility</p>
+                      <p className="text-xs text-textMuted">Private profiles only show posts to mutual follows.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsPrivate((current) => !current)}
+                      className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold ${isPrivate ? "bg-accent text-white" : "border border-border bg-surface text-text"}`}
+                    >
+                      {isPrivate ? <Lock size={14} /> : <Unlock size={14} />}
+                      {isPrivate ? "Private" : "Public"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <ImagePlus size={16} />
+                    <p className="text-sm font-semibold">Banner</p>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    {bannerPresets.slice(0, 5).map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setBannerColor(preset)}
+                        className={`h-12 w-16 rounded-2xl border transition ${bannerColor === preset ? "border-accent ring-2 ring-[color:var(--accent)]/30" : "border-border"}`}
+                        style={{ background: preset }}
+                      />
+                    ))}
+                  </div>
+                  <p className="text-xs text-textMuted">
+                    {profile.isPremium ? "Premium users can keep a color banner or upload a banner image." : "Choose one of five banner colors. Banner image upload is premium-only."}
+                  </p>
+                  {profile.isPremium ? (
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={async (event) => {
+                        const file = event.target.files?.[0];
+                        if (!file) {
+                          return;
+                        }
+
+                        try {
+                          await uploadProfileBanner(file);
+                          toast.success("Banner updated");
+                        } catch (error) {
+                          console.error("Failed to update banner", error);
+                          toast.error(getFirebaseErrorMessage(error));
+                        }
+                      }}
+                      className="w-full rounded-2xl border border-dashed border-border px-4 py-3 text-sm"
+                    />
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    disabled={isSavingProfile}
+                    onClick={async () => {
+                      setIsSavingProfile(true);
+                      try {
+                        if (displayName.trim() && displayName.trim() !== profile.displayName) {
+                          await updateDisplayName(displayName.trim());
+                        }
+                        await updateUserProfile(profile.uid, {
+                          bio: bio.trim(),
+                          location: location.trim(),
+                          bannerColor,
+                          isPrivate,
+                        });
+                        toast.success("Profile updated");
+                        onClose();
+                      } catch (error) {
+                        console.error("Failed to update profile", error);
+                        toast.error(getFirebaseErrorMessage(error));
+                      } finally {
+                        setIsSavingProfile(false);
+                      }
+                    }}
+                  >
+                    {isSavingProfile ? "Saving..." : "Save profile"}
+                  </Button>
+                  <div className="flex items-center gap-3">
+                    <Avatar name={profile.displayName} src={profile.photoURL} />
+                    <div className="space-y-1">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={async (event) => {
+                          const file = event.target.files?.[0];
+                          if (!file) {
+                            return;
+                          }
+
+                          try {
+                            await uploadProfilePicture(file);
+                            toast.success("Profile picture updated");
+                          } catch (error) {
+                            console.error("Failed to update profile picture", error);
+                            toast.error(getFirebaseErrorMessage(error));
+                          }
+                        }}
+                      />
+                      <p className="text-xs text-textMuted">Upload a new profile picture.</p>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            </div>
+
+            <div className="space-y-5">
+              <Card className="space-y-3 p-4">
+                <h3 className="font-semibold">Link Google</h3>
+                <p className="text-sm text-textMuted">Connect a Google account to this profile.</p>
+                <Button
+                  variant="secondary"
+                  onClick={async () => {
+                    try {
+                      await linkGoogleAccount();
+                      toast.success("Google account linked");
+                    } catch (error) {
+                      console.error("Failed to link Google account", error);
+                      toast.error(getFirebaseErrorMessage(error));
+                    }
+                  }}
+                >
+                  Link Google
+                </Button>
+              </Card>
+
+              <Card className="space-y-3 p-4">
+                <h3 className="font-semibold">Change password</h3>
+                <input
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                  type="password"
+                  placeholder="Current password"
+                  className="w-full rounded-2xl border border-border bg-transparent px-4 py-3 text-sm outline-none"
+                />
+                <input
+                  value={nextPassword}
+                  onChange={(event) => setNextPassword(event.target.value)}
+                  type="password"
+                  placeholder="New password"
+                  className="w-full rounded-2xl border border-border bg-transparent px-4 py-3 text-sm outline-none"
+                />
+                <Button
+                  variant="secondary"
+                  onClick={async () => {
+                    try {
+                      await changeUserPassword(currentPassword, nextPassword);
+                      toast.success("Password updated");
+                      setCurrentPassword("");
+                      setNextPassword("");
+                    } catch (error) {
+                      console.error("Failed to change password", error);
+                      toast.error(getFirebaseErrorMessage(error));
+                    }
+                  }}
+                >
+                  Update password
+                </Button>
+              </Card>
+
+              <Card className="space-y-3 p-4">
+                <h3 className="font-semibold">Visibility summary</h3>
+                <div className="space-y-2 text-sm text-textMuted">
+                  <p className="inline-flex items-center gap-2">{isPrivate ? <Lock size={14} /> : <Globe2 size={14} />}{isPrivate ? "Private profile" : "Public profile"}</p>
+                  <p>{isPrivate ? "Only mutuals can see your posts." : "Anyone can see your posts."}</p>
+                </div>
+              </Card>
+            </div>
           </div>
-        </div>
-
-        <div className="space-y-3">
-          <label className="block text-sm font-semibold">Display name</label>
-          <div className="flex gap-2">
-            <input
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              className="min-w-0 flex-1 rounded-2xl border border-border bg-transparent px-4 py-3 text-sm outline-none"
-            />
-            <Button
-              onClick={async () => {
-                try {
-                  await updateDisplayName(displayName.trim());
-                  toast.success("Display name updated");
-                } catch (error) {
-                  console.error("Failed to update display name", error);
-                  toast.error(getFirebaseErrorMessage(error));
-                }
-              }}
-            >
-              Save
-            </Button>
-          </div>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card className="space-y-3 p-4">
-            <h3 className="font-semibold">Link Google</h3>
-            <p className="text-sm text-textMuted">Connect a Google account to this profile.</p>
-            <Button
-              variant="secondary"
-              onClick={async () => {
-                try {
-                  await linkGoogleAccount();
-                  toast.success("Google account linked");
-                } catch (error) {
-                  console.error("Failed to link Google account", error);
-                  toast.error(getFirebaseErrorMessage(error));
-                }
-              }}
-            >
-              Link Google
-            </Button>
-          </Card>
-
-          <Card className="space-y-3 p-4">
-            <h3 className="font-semibold">Change password</h3>
-            <input
-              value={currentPassword}
-              onChange={(event) => setCurrentPassword(event.target.value)}
-              type="password"
-              placeholder="Current password"
-              className="w-full rounded-2xl border border-border bg-transparent px-4 py-3 text-sm outline-none"
-            />
-            <input
-              value={nextPassword}
-              onChange={(event) => setNextPassword(event.target.value)}
-              type="password"
-              placeholder="New password"
-              className="w-full rounded-2xl border border-border bg-transparent px-4 py-3 text-sm outline-none"
-            />
-            <Button
-              variant="secondary"
-              onClick={async () => {
-                try {
-                  await changeUserPassword(currentPassword, nextPassword);
-                  toast.success("Password updated");
-                  setCurrentPassword("");
-                  setNextPassword("");
-                } catch (error) {
-                  console.error("Failed to change password", error);
-                  toast.error(getFirebaseErrorMessage(error));
-                }
-              }}
-            >
-              Update password
-            </Button>
-          </Card>
-        </div>
-      </Card>
+        </Card>
+      </div>
     </div>
   );
 }
@@ -529,7 +835,7 @@ function ModeratorBanButton({ targetUserId }: { targetUserId: string }) {
   return (
     <Button
       variant="secondary"
-      className="text-red-500"
+      className="gap-2 text-red-500"
       disabled={isBanning}
       onClick={async () => {
         const confirmed = window.confirm("Ban this user? This removes their account, posts, and replies.");
@@ -694,8 +1000,8 @@ export function PostPage() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [replyText, setReplyText] = useState("");
   const [isFollowingAuthor, setIsFollowingAuthor] = useState(false);
-  const [author, setAuthor] = useState<ReturnType<typeof getDemoUserByHandle> | null>(null);
-  const [currentUserProfile, setCurrentUserProfile] = useState<ReturnType<typeof getDemoUserByHandle> | null>(null);
+  const [author, setAuthor] = useState<(typeof users)[number] | null>(null);
+  const [currentUserProfile, setCurrentUserProfile] = useState<(typeof users)[number] | null>(null);
   const [replyAuthors, setReplyAuthors] = useState<Record<string, (typeof users)[number] | null>>({});
   const [reactionCounts, setReactionCounts] = useState({ like: 0, fire: 0 });
 
@@ -766,19 +1072,19 @@ export function PostPage() {
   }, [post?.reactionTypeCounts?.fire, post?.reactionTypeCounts?.like]);
 
   return (
-    <PageFrame title="Post Thread" subtitle="Thread view, nested replies, quoted repost context, and moderation actions.">
+    <PageFrame title="Post Thread" subtitle="Thread view with compact media, reactions, and replies.">
       {!post ? (
         <Card className="p-6 text-sm text-textMuted">Post not found.</Card>
       ) : (
-        <div className="space-y-5">
+        <div className="space-y-4">
           <div className="flex items-center justify-between">
             <Button variant="secondary" onClick={() => navigate(-1)}>
               Back
             </Button>
             <p className="text-sm text-textMuted">{replies.length} comments</p>
           </div>
-          <Card className="space-y-4 p-6">
-            <div className="flex items-start gap-4">
+          <Card className="space-y-4 p-5">
+            <div className="flex items-start gap-3">
               <button
                 type="button"
                 className="shrink-0"
@@ -788,13 +1094,13 @@ export function PostPage() {
                   }
                 }}
               >
-                <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} className="h-16 w-16 rounded-3xl" />
+                <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} className="h-12 w-12 rounded-3xl" />
               </button>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    className="text-left text-lg font-semibold hover:underline"
+                    className="text-left font-semibold hover:underline"
                     onClick={() => {
                       if (author) {
                         navigate(`/profile/${author.handle}`);
@@ -805,8 +1111,11 @@ export function PostPage() {
                   </button>
                   {author ? <span className="rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-xs font-semibold text-[color:var(--accent)]">Lv {author.level}</span> : null}
                   {author ? <UserBadges user={author} /> : null}
+                  <span className="text-sm text-textMuted">@{author?.handle ?? "unknown"}</span>
                 </div>
-                <p className="text-sm text-textMuted">@{author?.handle ?? "unknown"}</p>
+                <p className="mt-1 text-sm leading-6 text-text">
+                  <InlineEntities text={post.content} />
+                </p>
               </div>
               <div className="flex flex-col gap-2">
                 {author && user?.uid !== author.uid ? (
@@ -819,39 +1128,67 @@ export function PostPage() {
                       await setFollowingRelationship(user.uid, author.uid, !isFollowingAuthor);
                     }}
                   >
-                    {isFollowingAuthor ? "Unfollow" : "Follow"}
+                    {isFollowingAuthor ? "Following" : "Follow"}
                   </Button>
                 ) : null}
                 {currentUserProfile && (currentUserProfile.uid === author?.uid || currentUserProfile.isModerator) ? (
                   <Button
                     variant="secondary"
+                    className="gap-2 text-red-500"
                     onClick={async () => {
                       await deleteDoc(doc(db, "posts", post.id));
                       navigate("/");
                     }}
                   >
-                    Delete post
+                    <Trash2 size={14} />
                   </Button>
                 ) : null}
               </div>
             </div>
-            <p className="text-lg font-semibold leading-7 text-text">
-              <InlineEntities text={post.content} />
-            </p>
+
+            {post.gifURL ? (
+              <img
+                src={post.gifURL}
+                alt="Attached GIF"
+                className="max-h-[30rem] w-full rounded-3xl border border-border object-cover"
+              />
+            ) : null}
             {post.imageURL ? (
               <img
                 src={post.imageURL}
                 alt="Post attachment"
-                className="w-full rounded-3xl border border-border object-cover"
+                className="max-h-[30rem] w-full rounded-3xl border border-border object-cover"
               />
             ) : null}
-            <div className="flex flex-wrap gap-4 text-sm text-textMuted">
-              <span>{reactionCounts.like} likes</span>
-              <span>{reactionCounts.fire} fire</span>
-              <span>{post.replyCount} comments</span>
+            {post.poll ? (
+              <div className="rounded-3xl border border-border bg-surfaceAlt/30 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-semibold">{post.poll.question}</p>
+                  <span className="text-xs text-textMuted">{post.poll.options.length} options</span>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {post.poll.options.map((option) => {
+                    const votes = post.poll?.votes?.[option]?.length ?? 0;
+                    return (
+                      <div key={option} className="rounded-2xl border border-border px-4 py-3 text-sm">
+                        <div className="flex items-center justify-between gap-3">
+                          <span>{option}</span>
+                          <span className="text-xs text-textMuted">{votes} votes</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap items-center gap-4 text-sm text-textMuted">
+              <span>👍 {reactionCounts.like}</span>
+              <span>👎 {reactionCounts.fire}</span>
+              <span>💬 {post.replyCount}</span>
             </div>
           </Card>
-          <Card className="space-y-4 p-6">
+          <Card className="space-y-4 p-5">
             <div className="flex items-center gap-2 font-semibold">
               <MessageCircle size={18} />
               Comments
@@ -872,6 +1209,7 @@ export function PostPage() {
                       key={reply.id}
                       reply={reply}
                       author={replyAuthor}
+                      parentAuthor={author}
                       canDelete={canDeleteReply}
                       onDelete={async () => {
                         await deleteDoc(doc(db, "posts", reply.id));

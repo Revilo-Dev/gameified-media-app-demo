@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Card } from "@/components/common/card";
 import { Button } from "@/components/common/button";
 import { XpProgress } from "@/components/gamification/xp-progress";
+import { SlotMachine } from "@/components/gamification/slot-machine";
 import { conversations, notifications, shopItems, triviaQuestions, users } from "@/lib/demo-data";
 import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/auth";
 import { useAuth } from "@/app/auth-provider";
@@ -979,7 +980,7 @@ export function ArcadePage() {
   }, []);
 
   return (
-    <PageFrame title="Arcade" subtitle="Daily trivia, one reward claim per day, and badge progress fit into a lightweight game layer.">
+    <PageFrame title="Arcade" subtitle="Daily trivia, slot machine, one reward claim per day, and badge progress fit into a lightweight game layer.">
       <div className="space-y-5">
         <Card className="space-y-4 p-6">
           <div className="flex items-center justify-between gap-3">
@@ -1009,6 +1010,7 @@ export function ArcadePage() {
             ))}
           </div>
         </Card>
+        <SlotMachine />
       </div>
     </PageFrame>
   );

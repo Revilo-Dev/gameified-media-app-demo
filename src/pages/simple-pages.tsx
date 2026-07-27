@@ -1330,12 +1330,11 @@ export function ArcadePage() {
   }, []);
 
   return (
-    <PageFrame title="Arcade" subtitle="Daily trivia, slot machine, one reward claim per day, and badge progress fit into a lightweight game layer.">
+    <PageFrame title="Arcade" subtitle="Gambling, slot machines, and daily rewards. Big Payouts, Bigger rewards">
       <div className="space-y-5">
         <Card className="flex items-center justify-between gap-4 p-6">
           <div>
             <p className="font-semibold">Daily gem reward</p>
-            <p className="text-sm text-textMuted">Claim your once-per-day arcade bonus without the old trivia card.</p>
           </div>
           <Button
             variant={claimedToday ? "secondary" : "primary"}
@@ -1361,7 +1360,7 @@ export function ArcadePage() {
 }
 
 export function MarketPage() {
-  return <PageFrame title="Market" subtitle="Coming soon. Fictional collectible listings, rarity filters, inventory, and transaction history stay strictly in-app." />;
+  return <PageFrame title="Market" subtitle="Coming soon. Spend your gems on cosmetics, themes, badges, and more" />;
 }
 
 export function ShopPage() {

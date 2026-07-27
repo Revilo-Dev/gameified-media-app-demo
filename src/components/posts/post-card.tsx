@@ -14,7 +14,7 @@ import { db } from "@/firebase/config";
 import { setFollowingRelationship, subscribeToFollowRelationship } from "@/firebase/follows";
 import { createNotification } from "@/firebase/notifications";
 import { setPostBookmarked, subscribeToBookmarkedPostIds } from "@/firebase/bookmarks";
-import { deletePostCascade, ratePost, throwRottenTomato } from "@/firebase/posts";
+import { deletePost, ratePost, subscribeToPostReaction, throwRottenTomato } from "@/firebase/posts";
 import { getDemoUserById, subscribeToUserProfileById } from "@/firebase/users";
 import type { Post, UserProfile } from "@/types/models";
 
@@ -46,6 +46,7 @@ export function PostCard({ post }: { post: Post }) {
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [submittingReaction, setSubmittingReaction] = useState(false);
+  const [currentUserStars, setCurrentUserStars] = useState(0);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const poll = post.poll ?? null;
   const pollEnded = poll ? new Date(poll.endsAt).getTime() <= Date.now() : false;
@@ -85,6 +86,17 @@ export function PostCard({ post }: { post: Post }) {
 
     return subscribeToBookmarkedPostIds(user.uid, (postIds) => {
       setIsBookmarked(postIds.includes(post.id));
+    });
+  }, [post.id, user]);
+
+  useEffect(() => {
+    if (!user) {
+      setCurrentUserStars(0);
+      return;
+    }
+
+    return subscribeToPostReaction(post.id, user.uid, (reaction) => {
+      setCurrentUserStars(reaction?.type === "star" ? Number(reaction.stars ?? 0) : 0);
     });
   }, [post.id, user]);
 
@@ -243,7 +255,7 @@ export function PostCard({ post }: { post: Post }) {
                         type="button"
                         className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-red-500 hover:bg-surfaceAlt"
                         onClick={async () => {
-                          await deletePostCascade(post.id);
+                          await deletePost(post.id);
                           setMenuOpen(false);
                         }}
                       >
@@ -305,7 +317,11 @@ export function PostCard({ post }: { post: Post }) {
             <div className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-1">
               {[1, 2, 3, 4, 5].map((star) => (
                 <button key={star} type="button" disabled={submittingReaction} onClick={() => void handleStar(star)}>
-                  <Star size={14} className="text-amber-400" fill="currentColor" />
+                  <Star
+                    size={14}
+                    className={star <= currentUserStars ? "text-[color:var(--accent)]" : "text-textMuted"}
+                    fill={star <= currentUserStars ? "currentColor" : "none"}
+                  />
                 </button>
               ))}
               <span className="ml-1 text-text">{post.averageRating.toFixed(1)}</span>

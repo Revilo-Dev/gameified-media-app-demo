@@ -155,15 +155,16 @@ export async function ratePost(postId: string, user: UserProfile, stars: number)
       throw new Error("Post not found.");
     }
 
-    if (reactionSnapshot.exists()) {
-      throw new Error("You already reacted to this post.");
-    }
-
     authorId = String(postSnapshot.data().authorId ?? "");
     const currentCount = Number(postSnapshot.data().starRatingCount ?? 0);
     const currentAverage = Number(postSnapshot.data().averageRating ?? 0);
-    const nextCount = currentCount + 1;
-    const nextAverage = Number((((currentAverage * currentCount) + stars) / nextCount).toFixed(2));
+    const previousStars = reactionSnapshot.exists() && reactionSnapshot.data().type === "star"
+      ? Number(reactionSnapshot.data().stars ?? 0)
+      : 0;
+    const nextCount = reactionSnapshot.exists() ? currentCount : currentCount + 1;
+    const totalBefore = currentAverage * currentCount;
+    const totalAfter = reactionSnapshot.exists() ? totalBefore - previousStars + stars : totalBefore + stars;
+    const nextAverage = Number((nextCount > 0 ? totalAfter / nextCount : 0).toFixed(2));
 
     transaction.set(reactionRef, {
       postId,
@@ -171,11 +172,11 @@ export async function ratePost(postId: string, user: UserProfile, stars: number)
       type: "star",
       stars,
       createdAt: serverTimestamp(),
-    });
+    }, { merge: true });
     transaction.update(postRef, {
       averageRating: nextAverage,
       starRatingCount: nextCount,
-      reactionCount: increment(1),
+      ...(reactionSnapshot.exists() ? {} : { reactionCount: increment(1) }),
     });
   });
 
@@ -189,6 +190,21 @@ export async function ratePost(postId: string, user: UserProfile, stars: number)
       postId,
     });
   }
+}
+
+export function subscribeToPostReaction(postId: string, userId: string, onChange: (reaction: { type: string; stars?: number } | null) => void): Unsubscribe {
+  return onSnapshot(doc(db, COLLECTIONS.reactions, reactionDocId(postId, userId)), (snapshot) => {
+    if (!snapshot.exists()) {
+      onChange(null);
+      return;
+    }
+
+    onChange(snapshot.data() as { type: string; stars?: number });
+  });
+}
+
+export async function deletePost(postId: string) {
+  await deleteDoc(doc(db, COLLECTIONS.posts, postId));
 }
 
 export async function throwRottenTomato(postId: string, user: UserProfile) {

@@ -78,6 +78,17 @@ function getRepliesLabel(count: number) {
 
 const changelogEntries = [
   {
+    version: "V0.56",
+    date: "July 28, 2026",
+    items: [
+      "Post cards were rebuilt onto one shared system so posts and replies now use the same stars, rotten tomatoes, media, polls, and moderation controls.",
+      "Thread pages now support replying to replies, nested conversations, and shared delete behavior instead of a separate custom reply surface.",
+      "Notifications were upgraded to a live inbox with read states for replies, follows, reports, ratings, rotten tomatoes, and level-up events.",
+      "Profile follower counts are now interactive, with follower and following lists that let you open profiles or follow people directly.",
+      "Moderators can now remove a post embed without deleting the post, and composer overlays now dismiss correctly during navigation.",
+    ],
+  },
+  {
     version: "V0.5",
     date: "July 27, 2026",
     items: [
@@ -1336,6 +1347,9 @@ export function NotificationsPage() {
 
   return (
     <PageFrame title="Notifications" subtitle="Replies, ratings, rotten tomatoes, level-ups, rewards, follows, and moderator reports all land here.">
+      {!user ? (
+        <Card className="p-6 text-sm text-textMuted">Sign in to view your live notifications.</Card>
+      ) : (
       <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
         <Card className="space-y-3 p-5">
           <div>
@@ -1349,7 +1363,7 @@ export function NotificationsPage() {
         </Card>
 
         <Card className="space-y-3 p-4">
-          {(items.length ? items : notifications).length ? (items.length ? items : notifications).map((item) => (
+          {items.length ? items.map((item) => (
             <button
               key={item.id}
               type="button"
@@ -1366,10 +1380,11 @@ export function NotificationsPage() {
               <p className="mt-3 text-xs text-textMuted">{new Date(item.createdAt).toLocaleString()}</p>
             </button>
           )) : (
-            <div className="rounded-2xl border border-border p-6 text-sm text-textMuted">No notifications yet.</div>
+            <div className="rounded-2xl border border-border p-6 text-sm text-textMuted">No live notifications yet.</div>
           )}
         </Card>
       </div>
+      )}
     </PageFrame>
   );
 }

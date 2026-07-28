@@ -281,7 +281,7 @@ export function PostComposer({
             <div className="relative overflow-visible rounded-[1.75rem] border border-border bg-surface">
               <textarea
                 {...form.register("content")}
-                placeholder={isReply ? "Write a reply..." : "Share a pulse with your crew..."}
+                placeholder={isReply ? "Write a reply..." : "Share a something..."}
                 className="min-h-28 w-full resize-none bg-transparent px-4 pb-12 pt-4 text-sm text-text outline-none placeholder:text-textMuted"
               />
               <div className="absolute inset-x-0 bottom-0 flex items-center justify-between px-3 py-2">

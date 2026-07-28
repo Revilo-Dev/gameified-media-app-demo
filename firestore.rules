@@ -55,6 +55,10 @@ service cloud.firestore {
           resource.data.parentPostId is string &&
           get(/databases/$(database)/documents/posts/$(resource.data.parentPostId)).data.authorId == request.auth.uid
         ) ||
+        (
+          resource.data.replyToPostId is string &&
+          get(/databases/$(database)/documents/posts/$(resource.data.replyToPostId)).data.authorId == request.auth.uid
+        ) ||
         isModerator()
       );
     }

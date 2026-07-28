@@ -287,8 +287,14 @@ export function PostCard({
                         type="button"
                         className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-red-500 hover:bg-surfaceAlt"
                         onClick={async () => {
-                          await deletePostCascade(post.id);
-                          setMenuOpen(false);
+                          try {
+                            await deletePostCascade(post.id);
+                            setMenuOpen(false);
+                            toast.success("Post deleted");
+                          } catch (error) {
+                            console.error(error);
+                            toast.error(error instanceof Error ? error.message : "Delete failed");
+                          }
                         }}
                       >
                         <Trash2 size={15} />

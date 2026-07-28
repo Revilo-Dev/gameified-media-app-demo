@@ -26,6 +26,7 @@ import { readCache, writeCache } from "@/lib/persistent-cache";
 import type { Post, UserProfile } from "@/types/models";
 
 const POSTS_CACHE_KEY = "cache:posts";
+const POSTS_CACHE_LIMIT = 25;
 
 function normalizeCreatedAt(value: unknown) {
   if (typeof value === "string") {
@@ -90,7 +91,7 @@ export function subscribeToPosts(onChange: (posts: Post[]) => void): Unsubscribe
 
   return onSnapshot(postsQuery, (snapshot) => {
     const nextPosts = snapshot.docs.map(normalizePost);
-    writeCache(POSTS_CACHE_KEY, nextPosts);
+    writeCache(POSTS_CACHE_KEY, nextPosts.slice(0, POSTS_CACHE_LIMIT));
     onChange(nextPosts);
   });
 }

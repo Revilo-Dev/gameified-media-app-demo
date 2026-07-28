@@ -47,6 +47,7 @@ function normalizePost(document: { id: string; data: () => Record<string, unknow
     id: document.id,
     authorId: String(data.authorId ?? ""),
     content: String(data.content ?? ""),
+    isDeleted: Boolean(data.isDeleted),
     imageURL: typeof data.imageURL === "string" ? data.imageURL : null,
     imageStoragePath: typeof data.imageStoragePath === "string" ? data.imageStoragePath : null,
     gifURL: typeof data.gifURL === "string" ? data.gifURL : null,
@@ -90,7 +91,7 @@ export function subscribeToPosts(onChange: (posts: Post[]) => void): Unsubscribe
   const postsQuery = query(collection(db, COLLECTIONS.posts), orderBy("createdAt", "desc"), limit(100));
 
   return onSnapshot(postsQuery, (snapshot) => {
-    const nextPosts = snapshot.docs.map(normalizePost);
+    const nextPosts = snapshot.docs.map(normalizePost).filter((post) => !post.isDeleted);
     writeCache(POSTS_CACHE_KEY, nextPosts.slice(0, POSTS_CACHE_LIMIT));
     onChange(nextPosts);
   });
@@ -100,7 +101,7 @@ export function subscribeToPostsByAuthor(authorId: string, onChange: (posts: Pos
   const postsQuery = query(collection(db, COLLECTIONS.posts), where("authorId", "==", authorId), orderBy("createdAt", "desc"), limit(100));
 
   return onSnapshot(postsQuery, (snapshot) => {
-    onChange(snapshot.docs.map(normalizePost));
+    onChange(snapshot.docs.map(normalizePost).filter((post) => !post.isDeleted));
   });
 }
 
@@ -156,6 +157,7 @@ export async function ratePost(postId: string, user: UserProfile, stars: number)
   const reactionRef = doc(db, COLLECTIONS.reactions, reactionDocId(postId, user.uid, "star"));
   const postRef = doc(db, COLLECTIONS.posts, postId);
   let authorId: string | null = null;
+  let isFirstStarRating = false;
 
   await runTransaction(db, async (transaction) => {
     const [postSnapshot, reactionSnapshot] = await Promise.all([transaction.get(postRef), transaction.get(reactionRef)]);
@@ -170,6 +172,7 @@ export async function ratePost(postId: string, user: UserProfile, stars: number)
     const previousStars = reactionSnapshot.exists() && reactionSnapshot.data().type === "star"
       ? Number(reactionSnapshot.data().stars ?? 0)
       : 0;
+    isFirstStarRating = !reactionSnapshot.exists();
     const nextCount = reactionSnapshot.exists() ? currentCount : currentCount + 1;
     const totalBefore = currentAverage * currentCount;
     const totalAfter = reactionSnapshot.exists() ? totalBefore - previousStars + stars : totalBefore + stars;
@@ -190,7 +193,7 @@ export async function ratePost(postId: string, user: UserProfile, stars: number)
   });
 
   const xpReward = getStarRatingXpReward(stars);
-  if (xpReward > 0) {
+  if (isFirstStarRating && xpReward > 0) {
     await addXpToUser(user.uid, xpReward);
   }
 
@@ -248,6 +251,38 @@ export function subscribeToPostReactions(
 
 export async function deletePost(postId: string) {
   await deleteDoc(doc(db, COLLECTIONS.posts, postId));
+}
+
+export async function softDeletePost(postId: string) {
+  const postRef = doc(db, COLLECTIONS.posts, postId);
+  const snapshot = await getDoc(postRef);
+  if (!snapshot.exists()) {
+    return;
+  }
+
+  const data = snapshot.data();
+  const parentPostId = typeof data.parentPostId === "string" ? data.parentPostId : null;
+  const replyToPostId = typeof data.replyToPostId === "string" ? data.replyToPostId : null;
+  const imageStoragePath = typeof data.imageStoragePath === "string" ? data.imageStoragePath : null;
+
+  await updateDoc(postRef, {
+    content: "[deleted]",
+    isDeleted: true,
+    imageURL: null,
+    imageStoragePath: null,
+    gifURL: null,
+    poll: null,
+    updatedAt: serverTimestamp(),
+  });
+  await deleteStorageObject(imageStoragePath);
+
+  if (parentPostId) {
+    await updateDoc(doc(db, COLLECTIONS.posts, parentPostId), { replyCount: increment(-1) });
+  }
+
+  if (replyToPostId && replyToPostId !== parentPostId) {
+    await updateDoc(doc(db, COLLECTIONS.posts, replyToPostId), { replyCount: increment(-1) });
+  }
 }
 
 export async function throwRottenTomato(postId: string, user: UserProfile) {

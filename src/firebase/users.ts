@@ -13,6 +13,20 @@ function buildHandle(displayName: string, uid: string) {
   return displayName.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 18) || `user${uid.slice(0, 6)}`;
 }
 
+async function createUniqueHandle(baseHandle: string, currentUserId?: string) {
+  const safeBase = baseHandle.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "").slice(0, 20) || `user${(currentUserId ?? "guest").slice(0, 6)}`;
+  let candidate = safeBase;
+  let suffix = 1;
+
+  while (!(await isHandleAvailable(candidate, currentUserId))) {
+    const suffixText = String(suffix);
+    candidate = `${safeBase.slice(0, Math.max(1, 20 - suffixText.length))}${suffixText}`;
+    suffix += 1;
+  }
+
+  return candidate;
+}
+
 export async function ensureUserProfile(user: User) {
   const ref = doc(db, COLLECTIONS.users, user.uid);
   const snapshot = await getDoc(ref);
@@ -22,11 +36,12 @@ export async function ensureUserProfile(user: User) {
   }
 
   const displayName = user.displayName?.trim() || user.email?.split("@")[0] || "New User";
+  const handle = await createUniqueHandle(buildHandle(displayName, user.uid), user.uid);
   const profile: UserProfile = {
     uid: user.uid,
     email: user.email ?? "",
     displayName,
-    handle: buildHandle(displayName, user.uid),
+    handle,
     photoURL: user.photoURL ?? null,
     photoStoragePath: null,
     bannerURL: null,
@@ -239,4 +254,16 @@ export async function getModeratorIds() {
   const moderatorsQuery = query(collection(db, COLLECTIONS.users), where("isModerator", "==", true), limit(50));
   const snapshot = await getDocs(moderatorsQuery);
   return snapshot.docs.map((document) => document.id);
+}
+
+export async function isHandleAvailable(handle: string, currentUserId?: string) {
+  const normalizedHandle = handle.trim().toLowerCase();
+  const profileQuery = query(collection(db, COLLECTIONS.users), where("handle", "==", normalizedHandle), limit(1));
+  const snapshot = await getDocs(profileQuery);
+
+  if (snapshot.empty) {
+    return true;
+  }
+
+  return snapshot.docs[0].id === currentUserId;
 }

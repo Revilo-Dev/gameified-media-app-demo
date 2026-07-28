@@ -1,10 +1,16 @@
 import { z } from "zod";
 
 const reservedHandles = new Set(["admin", "support", "system", "moderator", "root", "official"]);
+const baseDisplayNamePattern = /^[A-Za-z0-9 ]+$/;
 
 export const signupSchema = z
   .object({
-    displayName: z.string().trim().min(4).max(32),
+    displayName: z
+      .string()
+      .trim()
+      .min(2)
+      .max(32)
+      .regex(baseDisplayNamePattern, "Display name may only use letters, numbers, and spaces"),
     handle: z
       .string()
       .trim()

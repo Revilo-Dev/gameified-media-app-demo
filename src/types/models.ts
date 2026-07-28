@@ -57,6 +57,7 @@ export interface Post {
   id: string;
   authorId: string;
   content: string;
+  isDeleted?: boolean;
   imageURL: string | null;
   imageStoragePath: string | null;
   gifURL: string | null;

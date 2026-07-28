@@ -53,8 +53,12 @@ export function AppLayout() {
   const [followCounts, setFollowCounts] = useState({ followers: users[0].followerCount, following: users[0].followingCount });
   const [notificationCount, setNotificationCount] = useState(0);
   const [claimedToday, setClaimedToday] = useState(false);
+  const [displayedGems, setDisplayedGems] = useState(users[0].gems);
+  const [gemDelta, setGemDelta] = useState(0);
+  const [gemFlash, setGemFlash] = useState<"gain" | "spend" | null>(null);
   const previousRankRef = useRef<number | null>(null);
   const seenNotificationIdsRef = useRef<string[] | null>(null);
+  const previousGemsRef = useRef<number | null>(null);
   const profilePath = `/profile/${profile.handle}`;
   const rewardKey = "pulsearc-daily-gems";
   const profileCacheKey = user ? `cache:sidebar-profile:${user.uid}` : null;
@@ -78,6 +82,8 @@ export function AppLayout() {
   useEffect(() => {
     if (!user) {
       setProfile(users[0]);
+      setDisplayedGems(users[0].gems);
+      previousGemsRef.current = users[0].gems;
       return;
     }
 
@@ -154,6 +160,55 @@ export function AppLayout() {
     setComposerOpen(false);
   }, [location.pathname, setComposerOpen]);
 
+  useEffect(() => {
+    const nextGems = profile.gems;
+    const previousGems = previousGemsRef.current;
+
+    if (previousGems === null) {
+      previousGemsRef.current = nextGems;
+      setDisplayedGems(nextGems);
+      return;
+    }
+
+    if (nextGems === previousGems) {
+      setDisplayedGems(nextGems);
+      return;
+    }
+
+    const delta = nextGems - previousGems;
+    setGemDelta(delta);
+    setGemFlash(delta > 0 ? "gain" : "spend");
+    previousGemsRef.current = nextGems;
+
+    const flashTimeout = window.setTimeout(() => {
+      setGemFlash(null);
+      setGemDelta(0);
+    }, 1400);
+
+    const duration = 700;
+    const startedAt = performance.now();
+    let frameId = 0;
+
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      const nextValue = Math.round(previousGems + delta * progress);
+      setDisplayedGems(nextValue);
+
+      if (progress < 1) {
+        frameId = window.requestAnimationFrame(tick);
+      } else {
+        setDisplayedGems(nextGems);
+      }
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+
+    return () => {
+      window.clearTimeout(flashTimeout);
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [profile.gems]);
+
   if (!user) {
     return (
       <div className="mx-auto grid min-h-screen max-w-lg place-items-center px-4">
@@ -183,9 +238,22 @@ export function AppLayout() {
               <span>Followers <span className="font-semibold text-text">{followCounts.followers}</span></span>
             </div>
             <XpProgress xp={profile.xp} level={profile.level} />
-            <div className="rounded-2xl border border-border bg-surface px-4 py-3">
-              <p className="text-textMuted">Gems</p>
-              <p className="mt-1 text-xl font-bold">{profile.gems}</p>
+            <div className={`rounded-2xl border border-border bg-surface px-4 py-3 transition-all duration-500 ${
+              gemFlash === "gain" ? "gem-flash-gain" : gemFlash === "spend" ? "gem-flash-spend" : ""
+            }`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-textMuted">Gems</p>
+                  <p className="mt-1 text-xl font-bold tabular-nums">{displayedGems}</p>
+                </div>
+                {gemDelta !== 0 ? (
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
+                    gemDelta > 0 ? "bg-emerald-500/15 text-emerald-300" : "bg-[color:var(--error)]/15 text-[color:var(--error)]"
+                  }`}>
+                    {gemDelta > 0 ? `+${gemDelta}` : gemDelta}
+                  </span>
+                ) : null}
+              </div>
             </div>
             <Button
               variant={claimedToday ? "secondary" : "primary"}

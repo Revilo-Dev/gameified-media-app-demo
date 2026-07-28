@@ -57,7 +57,7 @@ export const themePresets: Record<ThemeMode, ThemeDefinition> = {
   },
   oled: {
     label: "OLED Black",
-    description: "Pure black surfaces with a vivid purple accent for high-contrast night sessions.",
+    description: "Pure black surfaces with a vivid purple accents",
     tokens: {
       text: "#f5f3ff",
       accent: "#a855f7",
@@ -74,7 +74,7 @@ export const themePresets: Record<ThemeMode, ThemeDefinition> = {
   },
   aurora: {
     label: "Aurora",
-    description: "Jade-led dark panels with vibrant coral-red accents for a glowing northern-lights feel.",
+    description: "Jade dark panels with vibrant coral-red accents",
     tokens: {
       text: "#e8fff8",
       accent: "#ff5370",
@@ -107,15 +107,15 @@ export const themePresets: Record<ThemeMode, ThemeDefinition> = {
     },
   },
   synthwave: {
-    label: "Retro",
-    description: "Retro theme with warm orange accents.",
+    label: "Coffee",
+    description: "Coffee theme with warm orange accents.",
     tokens: {
       text: "#fff1e6",
-      accent: "#ffc261",
+      accent: "#a5641a",
       secondary: "#b74609",
       error: "#f94144",
-      info: "#ffec43",
-      background: "#1a102f",
+      info: "#ff5f43",
+      background: "#1f0800",
       onBackground: "#fff1e6",
       surface: "#2c140b",
       surfaceAlt: "#3e1d11",

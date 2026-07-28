@@ -16,7 +16,7 @@ import { conversations, messages, shopItems, users } from "@/lib/demo-data";
 import { bannerPresets } from "@/lib/banner-presets";
 import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/auth";
 import { useAuth } from "@/app/auth-provider";
-import { addGemsToUser, addXpToUser, ensureUserProfile, getDemoUserByHandle, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
+import { addGemsToUser, addXpToUser, ensureUserProfile, getDemoUserByHandle, isHandleAvailable, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
 import { changeUserPassword, linkGoogleAccount, updateDisplayName, uploadProfileBanner, uploadProfilePicture } from "@/firebase/auth";
 import { deletePostCascade, subscribeToPosts, subscribeToPostsByAuthor } from "@/firebase/posts";
 import { InlineEntities } from "@/components/common/inline-entities";
@@ -110,6 +110,13 @@ const loginSchema = z.object({
 const signupSchema = loginSchema.extend({
   displayName: z.string().min(2).max(40),
 });
+
+const DISPLAY_NAME_MAX_LENGTH = 32;
+const HANDLE_MAX_LENGTH = 20;
+const BIO_MAX_LENGTH = 180;
+const LOCATION_MAX_LENGTH = 60;
+const DISPLAY_NAME_PATTERN = /^[A-Za-z0-9 ]+$/;
+const HANDLE_PATTERN = /^[a-z0-9_]+$/;
 
 function ReplyCard({
   reply,
@@ -611,6 +618,7 @@ function EditProfileModal({
   profile: (typeof users)[number];
 }) {
   const [displayName, setDisplayName] = useState(profile.displayName);
+  const [handle, setHandle] = useState(profile.handle);
   const [bio, setBio] = useState(profile.bio);
   const [location, setLocation] = useState(profile.location);
   const [bannerColor, setBannerColor] = useState(profile.bannerColor ?? bannerPresets[0]);
@@ -622,12 +630,13 @@ function EditProfileModal({
   useEffect(() => {
     if (open) {
       setDisplayName(profile.displayName);
+      setHandle(profile.handle);
       setBio(profile.bio);
       setLocation(profile.location);
       setBannerColor(profile.bannerColor ?? bannerPresets[0]);
       setIsPrivate(profile.isPrivate);
     }
-  }, [open, profile.bannerColor, profile.bio, profile.displayName, profile.isPrivate, profile.location]);
+  }, [open, profile.bannerColor, profile.bio, profile.displayName, profile.handle, profile.isPrivate, profile.location]);
 
   if (!open) {
     return null;
@@ -659,7 +668,7 @@ function EditProfileModal({
                         </div>
                         <div>
                           <p className="font-semibold">{displayName || "Display name"}</p>
-                          <p className="text-sm text-textMuted">@{profile.handle}</p>
+                          <p className="text-sm text-textMuted">@{handle || profile.handle}</p>
                         </div>
                       </div>
                       <p className="text-sm text-textMuted">{bio || "Your bio will show here."}</p>
@@ -673,17 +682,31 @@ function EditProfileModal({
                     <input
                       value={displayName}
                       onChange={(event) => setDisplayName(event.target.value)}
+                      maxLength={DISPLAY_NAME_MAX_LENGTH}
                       className="w-full rounded-2xl border border-border bg-transparent px-4 py-3 text-sm outline-none"
                     />
+                    <p className="text-xs text-textMuted">{displayName.length}/{DISPLAY_NAME_MAX_LENGTH}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-sm font-semibold">Handle</label>
+                    <input
+                      value={handle}
+                      onChange={(event) => setHandle(event.target.value.toLowerCase())}
+                      maxLength={HANDLE_MAX_LENGTH}
+                      className="w-full rounded-2xl border border-border bg-transparent px-4 py-3 text-sm outline-none"
+                    />
+                    <p className="text-xs text-textMuted">{handle.length}/{HANDLE_MAX_LENGTH}</p>
                   </div>
                   <div className="space-y-2">
                     <label className="block text-sm font-semibold">Location</label>
                     <input
                       value={location}
                       onChange={(event) => setLocation(event.target.value)}
+                      maxLength={LOCATION_MAX_LENGTH}
                       placeholder="City, country, or remote"
                       className="w-full rounded-2xl border border-border bg-transparent px-4 py-3 text-sm outline-none"
                     />
+                    <p className="text-xs text-textMuted">{location.length}/{LOCATION_MAX_LENGTH}</p>
                   </div>
                 </div>
 
@@ -693,10 +716,11 @@ function EditProfileModal({
                     value={bio}
                     onChange={(event) => setBio(event.target.value)}
                     rows={4}
-                    maxLength={180}
+                    maxLength={BIO_MAX_LENGTH}
                     placeholder="Tell people what you're about."
                     className="w-full rounded-3xl border border-border bg-transparent px-4 py-3 text-sm outline-none"
                   />
+                  <p className="text-xs text-textMuted">{bio.length}/{BIO_MAX_LENGTH}</p>
                 </div>
 
                 <div className="space-y-3">
@@ -764,12 +788,41 @@ function EditProfileModal({
                     onClick={async () => {
                       setIsSavingProfile(true);
                       try {
-                        if (displayName.trim() && displayName.trim() !== profile.displayName) {
-                          await updateDisplayName(displayName.trim());
+                        const nextDisplayName = displayName.trim();
+                        const nextHandle = handle.trim().toLowerCase();
+                        const nextBio = bio.trim();
+                        const nextLocation = location.trim();
+
+                        if (!nextDisplayName || nextDisplayName.length > DISPLAY_NAME_MAX_LENGTH || !DISPLAY_NAME_PATTERN.test(nextDisplayName)) {
+                          throw new Error("Display name may only use letters, numbers, and spaces, and must be 1-32 characters.");
+                        }
+
+                        if (!nextHandle || nextHandle.length < 3 || nextHandle.length > HANDLE_MAX_LENGTH || !HANDLE_PATTERN.test(nextHandle)) {
+                          throw new Error("Handle must be 3-20 characters using lowercase letters, numbers, and underscores.");
+                        }
+
+                        if (nextBio.length > BIO_MAX_LENGTH) {
+                          throw new Error(`Bio must be ${BIO_MAX_LENGTH} characters or fewer.`);
+                        }
+
+                        if (nextLocation.length > LOCATION_MAX_LENGTH) {
+                          throw new Error(`Location must be ${LOCATION_MAX_LENGTH} characters or fewer.`);
+                        }
+
+                        if (nextHandle !== profile.handle) {
+                          const available = await isHandleAvailable(nextHandle, profile.uid);
+                          if (!available) {
+                            throw new Error("That handle is already taken.");
+                          }
+                        }
+
+                        if (nextDisplayName !== profile.displayName) {
+                          await updateDisplayName(nextDisplayName);
                         }
                         await updateUserProfile(profile.uid, {
-                          bio: bio.trim(),
-                          location: location.trim(),
+                          handle: nextHandle,
+                          bio: nextBio,
+                          location: nextLocation,
                           bannerColor,
                           isPrivate,
                         });
@@ -932,49 +985,40 @@ function ModeratorBanButton({ targetUserId }: { targetUserId: string }) {
 
 export function PremiumPage() {
   return (
-    <PageFrame title="Premium" subtitle="Upgrade for banner uploads, premium flair, and a more expressive profile.">
+    <PageFrame title="Premium" subtitle="Upgrade to premium">
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(18rem,0.7fr)]">
         <Card className="space-y-5 overflow-hidden p-0">
-          <div className="bg-[radial-gradient(circle_at_top_left,_rgba(255,107,87,0.35),_transparent_42%),linear-gradient(135deg,#20131a_0%,#402029_52%,#ff6b57_100%)] p-6 text-white">
+          <div className="bg-[radial-gradient(circle_at_top_left,_rgba(255,107,87,0.35),_transparent_42%),linear-gradient(135deg,#20131a_0%,#402029_52%,#ff6b57_100%)] p-14 text-white">
             <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em]">
               <Sparkles size={14} />
-              PulseArc Premium
+              Premium
             </div>
-            <h2 className="mt-4 max-w-xl text-3xl font-bold">Make your profile feel like a headline, not a placeholder.</h2>
-            <p className="mt-3 max-w-2xl text-sm text-white/80">Premium unlocks banner image uploads, richer visual identity, and elevated profile presentation across the app.</p>
-          </div>
-          <div className="grid gap-4 p-6 md:grid-cols-2">
-            <div className="rounded-3xl border border-border bg-surfaceAlt/40 p-5">
-              <p className="font-semibold">Included</p>
-              <div className="mt-3 space-y-3 text-sm text-textMuted">
-                <p>Banner image uploads instead of color-only headers.</p>
-                <p>Premium identity badge across profile and posts.</p>
-                <p>More expressive profile styling for creator and moderator accounts.</p>
-              </div>
-            </div>
-            <div className="rounded-3xl border border-border bg-surfaceAlt/40 p-5">
-              <p className="font-semibold">Why upgrade</p>
-              <div className="mt-3 space-y-3 text-sm text-textMuted">
-                <p>Stand out in feeds with stronger visual branding.</p>
-                <p>Give your profile a proper hero treatment.</p>
-                <p>Keep your public presence feeling intentional and polished.</p>
-              </div>
-            </div>
+            <h2 className="mt-4 max-w-xl text-3xl font-bold">Enjoy the benifits of premium, for just 1$ a month.</h2>
+            <p className="mt-3 max-w-2xl text-sm text-white/80">Premium unlocks tons of features and defs aint a scam</p>
           </div>
         </Card>
 
         <Card className="space-y-4 p-6">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent)]">Upgrade plan</p>
-            <h3 className="mt-2 text-2xl font-bold">$8 / month</h3>
-            <p className="mt-2 text-sm text-textMuted">A simple premium tier for profile customization and account flair.</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent)]">Premium</p>
+            <h3 className="mt-2 text-2xl font-bold">$1 / month</h3>
+            <p className="mt-2 text-sm text-textMuted">Best value </p>
           </div>
           <Button className="w-full gap-2">
             <Crown size={16} />
             Buy Premium
           </Button>
-          <p className="text-xs text-textMuted">Checkout is placeholder-only in this demo, but this page is ready to become the real upgrade surface.</p>
+                    <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent)]">Premium +</p>
+            <h3 className="mt-2 text-2xl font-bold">$5 / month</h3>
+            <p className="mt-2 text-sm text-textMuted">Most Popular </p>
+          </div>
+          <Button className="w-full gap-2">
+            <Crown size={16} />
+            Buy Premium
+          </Button>
         </Card>
+        
       </div>
     </PageFrame>
   );

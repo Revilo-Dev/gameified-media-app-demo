@@ -13,8 +13,9 @@ import { UserBadges } from "@/components/common/user-badges";
 import { setPostBookmarked, subscribeToBookmarkedPostIds } from "@/firebase/bookmarks";
 import { db } from "@/firebase/config";
 import { setFollowingRelationship, subscribeToFollowRelationship } from "@/firebase/follows";
+import { deletePostCascade as deletePostCascadeCallable } from "@/firebase/functions";
 import { createNotification } from "@/firebase/notifications";
-import { deletePostCascade, ratePost, removePostEmbed, subscribeToPostReactions, throwRottenTomato } from "@/firebase/posts";
+import { ratePost, removePostEmbed, softDeletePost, subscribeToPostReactions, throwRottenTomato } from "@/firebase/posts";
 import { getDemoUserById, getModeratorIds, subscribeToUserProfileById } from "@/firebase/users";
 import type { Post, UserProfile } from "@/types/models";
 
@@ -288,12 +289,19 @@ export function PostCard({
                         className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-red-500 hover:bg-surfaceAlt"
                         onClick={async () => {
                           try {
-                            await deletePostCascade(post.id);
+                            await deletePostCascadeCallable(post.id);
                             setMenuOpen(false);
                             toast.success("Post deleted");
                           } catch (error) {
                             console.error(error);
-                            toast.error(error instanceof Error ? error.message : "Delete failed");
+                            try {
+                              await softDeletePost(post.id);
+                              setMenuOpen(false);
+                              toast.success("Post deleted");
+                            } catch (fallbackError) {
+                              console.error(fallbackError);
+                              toast.error(fallbackError instanceof Error ? fallbackError.message : "Delete failed");
+                            }
                           }
                         }}
                       >

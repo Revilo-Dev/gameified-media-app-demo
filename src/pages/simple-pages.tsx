@@ -77,7 +77,7 @@ function getRepliesLabel(count: number) {
 }
 
 const changelogEntries = [
-  {
+    {
     version: "V0.56",
     date: "July 28, 2026",
     items: [
@@ -1159,7 +1159,7 @@ export function PostPage() {
   }
 
   return (
-    <PageFrame title="Post Thread" subtitle="Threaded replies, ratings, polls, and media all run through the same shared post system here.">
+    <PageFrame title="" subtitle="">
       {!post ? (
         <Card className="p-6 text-sm text-textMuted">Post not found.</Card>
       ) : (
@@ -1174,7 +1174,7 @@ export function PostPage() {
           <Card className="space-y-4 p-5">
             <div className="flex items-center gap-2 font-semibold">
               <MessageCircle size={18} />
-              Thread
+              Comments
               <span className="rounded-full bg-surfaceAlt px-2 py-0.5 text-xs font-medium text-textMuted">{replies.length}</span>
             </div>
             {replies.length ? renderReplies(post.id) : (
@@ -1347,9 +1347,6 @@ export function NotificationsPage() {
 
   return (
     <PageFrame title="Notifications" subtitle="Replies, ratings, rotten tomatoes, level-ups, rewards, follows, and moderator reports all land here.">
-      {!user ? (
-        <Card className="p-6 text-sm text-textMuted">Sign in to view your live notifications.</Card>
-      ) : (
       <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
         <Card className="space-y-3 p-5">
           <div>
@@ -1363,7 +1360,7 @@ export function NotificationsPage() {
         </Card>
 
         <Card className="space-y-3 p-4">
-          {items.length ? items.map((item) => (
+          {(items.length ? items : notifications).length ? (items.length ? items : notifications).map((item) => (
             <button
               key={item.id}
               type="button"
@@ -1380,11 +1377,10 @@ export function NotificationsPage() {
               <p className="mt-3 text-xs text-textMuted">{new Date(item.createdAt).toLocaleString()}</p>
             </button>
           )) : (
-            <div className="rounded-2xl border border-border p-6 text-sm text-textMuted">No live notifications yet.</div>
+            <div className="rounded-2xl border border-border p-6 text-sm text-textMuted">No notifications yet.</div>
           )}
         </Card>
       </div>
-      )}
     </PageFrame>
   );
 }
@@ -1592,7 +1588,7 @@ export function LeaderboardPage() {
   useEffect(() => subscribeToXpLeaderboard(setLeaders), []);
 
   return (
-    <PageFrame title="Leaderboard" subtitle="Global, weekly, XP, level, arcade, and badge leaderboards are ready for live data bindings.">
+    <PageFrame title="Leaderboard" subtitle="Top users by level">
       <Card className="space-y-3 p-6">
         {leaders.map((leader, index) => {
           const progress = getXpProgress(leader.xp, leader.level);

@@ -18,20 +18,21 @@ import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/a
 import { useAuth } from "@/app/auth-provider";
 import { addGemsToUser, addXpToUser, ensureUserProfile, getDemoUserByHandle, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
 import { changeUserPassword, linkGoogleAccount, updateDisplayName, uploadProfileBanner, uploadProfilePicture } from "@/firebase/auth";
-import { createPost, subscribeToPosts, subscribeToPostsByAuthor } from "@/firebase/posts";
+import { deletePostCascade, subscribeToPosts, subscribeToPostsByAuthor } from "@/firebase/posts";
 import { InlineEntities } from "@/components/common/inline-entities";
 import { Avatar } from "@/components/common/avatar";
-import { setFollowingRelationship, subscribeToFollowCounts, subscribeToFollowRelationship } from "@/firebase/follows";
+import { setFollowingRelationship, subscribeToFollowerIds, subscribeToFollowCounts, subscribeToFollowRelationship, subscribeToFollowingIds } from "@/firebase/follows";
 import { useUiStore } from "@/store/use-ui-store";
 import { getXpProgress } from "@/constants/gamification";
 import { themePresets } from "@/lib/theme-presets";
 import { readCache, writeCache } from "@/lib/persistent-cache";
 import { banUserAccount } from "@/firebase/functions";
 import { subscribeToBookmarkedPosts } from "@/firebase/bookmarks";
-import { subscribeToNotifications } from "@/firebase/notifications";
+import { markNotificationRead, subscribeToNotifications } from "@/firebase/notifications";
 import { UserBadges } from "@/components/common/user-badges";
 import { PostCard } from "@/components/posts/post-card";
-import type { Conversation, Message, NotificationItem, Post } from "@/types/models";
+import { PostComposer } from "@/components/posts/post-composer";
+import type { Conversation, Message, NotificationItem, Post, UserProfile } from "@/types/models";
 
 function getFirebaseErrorMessage(error: unknown) {
   if (typeof error !== "object" || error === null) {
@@ -179,6 +180,10 @@ export function ProfilePage() {
   const [profileTab, setProfileTab] = useState<"posts" | "replies">("posts");
   const [leaderboardRank, setLeaderboardRank] = useState<number | null>(null);
   const [parentAuthors, setParentAuthors] = useState<Record<string, (typeof users)[number] | null>>({});
+  const [followModalTab, setFollowModalTab] = useState<"followers" | "following" | null>(null);
+  const [followerIds, setFollowerIds] = useState<string[]>([]);
+  const [followingIds, setFollowingIds] = useState<string[]>([]);
+  const [followProfiles, setFollowProfiles] = useState<Record<string, UserProfile | null>>({});
 
   useEffect(() => {
     if (!handle) {
@@ -248,6 +253,24 @@ export function ProfilePage() {
     });
   }, [user?.uid]);
 
+  useEffect(() => {
+    if (!user?.uid || !followModalTab) {
+      if (!followModalTab) {
+        setFollowerIds([]);
+        setFollowingIds([]);
+      }
+      return;
+    }
+
+    const unsubscribeFollowers = subscribeToFollowerIds(user.uid, setFollowerIds);
+    const unsubscribeFollowing = subscribeToFollowingIds(user.uid, setFollowingIds);
+
+    return () => {
+      unsubscribeFollowers();
+      unsubscribeFollowing();
+    };
+  }, [followModalTab, user?.uid]);
+
   const userPosts = useMemo(() => allUserPosts.filter((post) => !post.parentPostId), [allUserPosts]);
   const userReplies = useMemo(() => allUserPosts.filter((post) => Boolean(post.parentPostId)), [allUserPosts]);
   const isMutual = isFollowing && followsViewer;
@@ -267,6 +290,35 @@ export function ProfilePage() {
 
     setParentAuthors(nextParentAuthors);
   }, [allPosts, userReplies]);
+
+  const visibleFollowIds = useMemo(
+    () => (followModalTab === "followers" ? followerIds : followModalTab === "following" ? followingIds : []),
+    [followModalTab, followerIds, followingIds],
+  );
+
+  useEffect(() => {
+    if (!visibleFollowIds.length) {
+      return;
+    }
+
+    const unsubscribers = visibleFollowIds.map((profileId) =>
+      subscribeToUserProfileById(profileId, (profile) => {
+        setFollowProfiles((current) => ({
+          ...current,
+          [profileId]: profile ?? users.find((candidate) => candidate.uid === profileId) ?? null,
+        }));
+      }),
+    );
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [visibleFollowIds]);
+
+  const visibleFollowProfiles = useMemo(
+    () => visibleFollowIds.map((profileId) => followProfiles[profileId]).filter((profile): profile is UserProfile => Boolean(profile)),
+    [followProfiles, visibleFollowIds],
+  );
 
   if (!user) {
     return (
@@ -352,12 +404,20 @@ export function ProfilePage() {
 
           <div className="grid gap-3 md:grid-cols-[auto_minmax(0,1fr)] md:items-center">
             <div className="flex flex-wrap gap-3 text-sm">
-              <span className="rounded-2xl border border-border px-3 py-2">
+              <button
+                type="button"
+                className="rounded-2xl border border-border px-3 py-2 text-left transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                onClick={() => setFollowModalTab("followers")}
+              >
                 <strong>{followCounts.followers}</strong> Followers
-              </span>
-              <span className="rounded-2xl border border-border px-3 py-2">
+              </button>
+              <button
+                type="button"
+                className="rounded-2xl border border-border px-3 py-2 text-left transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                onClick={() => setFollowModalTab("following")}
+              >
                 <strong>{followCounts.following}</strong> Following
-              </span>
+              </button>
             </div>
             <XpProgress xp={user.xp} level={user.level} />
           </div>
@@ -394,18 +454,10 @@ export function ProfilePage() {
         ) : userReplies.length ? (
           <div className="space-y-3">
             {userReplies.map((reply) => (
-              <ReplyCard
+              <PostCard
                 key={reply.id}
-                reply={reply}
-                author={user}
-                parentAuthor={parentAuthors[reply.id] ?? null}
-                canDelete={isOwnProfile}
-                onDelete={async () => {
-                  await deleteDoc(doc(db, "posts", reply.id));
-                  if (reply.parentPostId) {
-                    await updateDoc(doc(db, "posts", reply.parentPostId), { replyCount: increment(-1) });
-                  }
-                }}
+                post={reply}
+                replyContextLabel={parentAuthors[reply.id] ? `@${parentAuthors[reply.id]?.handle}` : null}
               />
             ))}
           </div>
@@ -415,6 +467,14 @@ export function ProfilePage() {
       </section>
 
       {isOwnProfile ? <EditProfileModal open={isEditorOpen} onClose={() => setIsEditorOpen(false)} profile={user} /> : null}
+      <FollowListModal
+        open={Boolean(followModalTab)}
+        title={followModalTab === "followers" ? "Followers" : "Following"}
+        currentUserId={currentUserId}
+        profileUserId={user.uid}
+        users={visibleFollowProfiles}
+        onClose={() => setFollowModalTab(null)}
+      />
     </div>
   );
 }
@@ -991,58 +1051,32 @@ export function OnboardingPage() {
 
 export function PostPage() {
   const { postId } = useParams();
-  const { user } = useAuth();
   const navigate = useNavigate();
   const [posts, setPosts] = useState<Post[]>([]);
-  const [replyText, setReplyText] = useState("");
-  const [isFollowingAuthor, setIsFollowingAuthor] = useState(false);
-  const [author, setAuthor] = useState<(typeof users)[number] | null>(null);
-  const [currentUserProfile, setCurrentUserProfile] = useState<(typeof users)[number] | null>(null);
-  const [replyAuthors, setReplyAuthors] = useState<Record<string, (typeof users)[number] | null>>({});
-  const [reactionCounts, setReactionCounts] = useState({ like: 0, fire: 0 });
+  const [profilesById, setProfilesById] = useState<Record<string, (typeof users)[number] | null>>({});
+  const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
 
   useEffect(() => subscribeToPosts(setPosts), []);
 
   const post = posts.find((item: Post) => item.id === postId);
-  const replies = posts.filter((item: Post) => item.parentPostId === postId);
+  const replies = useMemo(() => posts.filter((item: Post) => item.parentPostId === postId), [posts, postId]);
 
   useEffect(() => {
-    if (!user) {
-      setCurrentUserProfile(null);
+    const relevantUserIds = Array.from(new Set(
+      [post?.authorId, ...replies.map((reply) => reply.authorId)]
+        .filter((value): value is string => Boolean(value)),
+    ));
+
+    if (!relevantUserIds.length) {
+      setProfilesById({});
       return;
     }
 
-    return subscribeToUserProfileById(user.uid, (profile) => {
-      setCurrentUserProfile(profile);
-    });
-  }, [user]);
-
-  useEffect(() => {
-    if (!post) {
-      return;
-    }
-
-    const demoProfile = users.find((profile) => profile.uid === post.authorId) ?? null;
-    setAuthor(demoProfile);
-
-    return subscribeToUserProfileById(post.authorId, (profile) => {
-      setAuthor(profile ?? demoProfile);
-      if (!profile) {
-        console.warn("[post-page] missing author profile", { postId: post.id, authorId: post.authorId });
-      }
-    });
-  }, [post?.authorId, post?.id]);
-
-  useEffect(() => {
-    if (!replies.length) {
-      setReplyAuthors({});
-      return;
-    }
-    const unsubscribers = replies.map((reply) =>
-      subscribeToUserProfileById(reply.authorId, (profile) => {
-        setReplyAuthors((current) => ({
+    const unsubscribers = relevantUserIds.map((userId) =>
+      subscribeToUserProfileById(userId, (profile) => {
+        setProfilesById((current) => ({
           ...current,
-          [reply.id]: profile ?? users.find((candidate) => candidate.uid === reply.authorId) ?? null,
+          [userId]: profile ?? users.find((candidate) => candidate.uid === userId) ?? null,
         }));
       }),
     );
@@ -1050,25 +1084,71 @@ export function PostPage() {
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [replies, post?.id]);
+  }, [post?.authorId, replies]);
 
-  useEffect(() => {
-    if (!user || !author || author.uid === user.uid) {
-      return;
+  const replyTarget = replies.find((reply) => reply.id === replyTargetId) ?? null;
+  const groupedReplies = useMemo(() => {
+    const grouped = new Map<string, Post[]>();
+    for (const reply of replies) {
+      const key = reply.replyToPostId ?? reply.parentPostId ?? "";
+      const current = grouped.get(key) ?? [];
+      current.push(reply);
+      grouped.set(key, current);
     }
 
-    return subscribeToFollowRelationship(user.uid, author.uid, setIsFollowingAuthor);
-  }, [author?.uid, user?.uid]);
+    for (const entry of grouped.values()) {
+      entry.sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
+    }
 
-  useEffect(() => {
-    setReactionCounts({
-      like: post?.reactionTypeCounts?.like ?? 0,
-      fire: post?.reactionTypeCounts?.fire ?? 0,
-    });
-  }, [post?.reactionTypeCounts?.fire, post?.reactionTypeCounts?.like]);
+    return grouped;
+  }, [replies]);
+
+  function getReplyContextLabel(reply: Post) {
+    const targetId = reply.replyToPostId ?? reply.parentPostId;
+    if (!targetId) {
+      return null;
+    }
+
+    if (post && targetId === post.id) {
+      const rootAuthor = profilesById[post.authorId];
+      return rootAuthor ? `@${rootAuthor.handle}` : null;
+    }
+
+    const targetReply = replies.find((item) => item.id === targetId);
+    if (!targetReply) {
+      return null;
+    }
+
+    const targetProfile = profilesById[targetReply.authorId];
+    return targetProfile ? `@${targetProfile.handle}` : null;
+  }
+
+  function renderReplies(parentId: string, depth = 0): ReactNode {
+    const children = groupedReplies.get(parentId) ?? [];
+    if (!children.length) {
+      return null;
+    }
+
+    return (
+      <div className="space-y-3">
+        {children.map((reply) => (
+          <div key={reply.id} className={depth ? "ml-4 border-l border-border pl-4 sm:ml-6 sm:pl-5" : ""}>
+            <PostCard
+              post={reply}
+              replyContextLabel={getReplyContextLabel(reply)}
+              onReply={() => setReplyTargetId(reply.id)}
+            />
+            <div className="mt-3">
+              {renderReplies(reply.id, depth + 1)}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
-    <PageFrame title="Post Thread" subtitle="Thread view with compact media, reactions, and replies.">
+    <PageFrame title="Post Thread" subtitle="Threaded replies, ratings, polls, and media all run through the same shared post system here.">
       {!post ? (
         <Card className="p-6 text-sm text-textMuted">Post not found.</Card>
       ) : (
@@ -1077,180 +1157,40 @@ export function PostPage() {
             <Button variant="secondary" onClick={() => navigate(-1)}>
               Back
             </Button>
-            <p className="text-sm text-textMuted">{replies.length} comments</p>
+            <p className="text-sm text-textMuted">{replies.length} replies</p>
           </div>
-          <Card className="space-y-4 p-5">
-            <div className="flex items-start gap-3">
-              <button
-                type="button"
-                className="shrink-0"
-                onClick={() => {
-                  if (author) {
-                    navigate(`/profile/${author.handle}`);
-                  }
-                }}
-              >
-                <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} className="h-12 w-12 rounded-3xl" />
-              </button>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    className="text-left font-semibold hover:underline"
-                    onClick={() => {
-                      if (author) {
-                        navigate(`/profile/${author.handle}`);
-                      }
-                    }}
-                  >
-                    {author?.displayName ?? "Unknown profile"}
-                  </button>
-                  {author ? <span className="rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-xs font-semibold text-[color:var(--accent)]">Lv {author.level}</span> : null}
-                  {author ? <UserBadges user={author} /> : null}
-                  <span className="text-sm text-textMuted">@{author?.handle ?? "unknown"}</span>
-                </div>
-                <p className="mt-1 text-sm leading-6 text-text">
-                  <InlineEntities text={post.content} />
-                </p>
-              </div>
-              <div className="flex flex-col gap-2">
-                {author && user?.uid !== author.uid ? (
-                  <Button
-                    variant={isFollowingAuthor ? "secondary" : "primary"}
-                    onClick={async () => {
-                      if (!user) {
-                        return;
-                      }
-                      await setFollowingRelationship(user.uid, author.uid, !isFollowingAuthor);
-                    }}
-                  >
-                    {isFollowingAuthor ? "Following" : "Follow"}
-                  </Button>
-                ) : null}
-                {currentUserProfile && (currentUserProfile.uid === author?.uid || currentUserProfile.isModerator) ? (
-                  <Button
-                    variant="secondary"
-                    className="gap-2 text-red-500"
-                    onClick={async () => {
-                      await deleteDoc(doc(db, "posts", post.id));
-                      navigate("/");
-                    }}
-                  >
-                    <Trash2 size={14} />
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-
-            {post.gifURL ? (
-              <img
-                src={post.gifURL}
-                alt="Attached GIF"
-                className="max-h-[30rem] w-full rounded-3xl border border-border object-cover"
-              />
-            ) : null}
-            {post.imageURL ? (
-              <img
-                src={post.imageURL}
-                alt="Post attachment"
-                className="max-h-[30rem] w-full rounded-3xl border border-border object-cover"
-              />
-            ) : null}
-            {post.poll ? (
-              <div className="rounded-3xl border border-border bg-surfaceAlt/30 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="font-semibold">{post.poll.question}</p>
-                  <span className="text-xs text-textMuted">{post.poll.options.length} options</span>
-                </div>
-                <div className="mt-3 space-y-2">
-                  {post.poll.options.map((option) => {
-                    const votes = post.poll?.votes?.[option]?.length ?? 0;
-                    return (
-                      <div key={option} className="rounded-2xl border border-border px-4 py-3 text-sm">
-                        <div className="flex items-center justify-between gap-3">
-                          <span>{option}</span>
-                          <span className="text-xs text-textMuted">{votes} votes</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : null}
-
-            <div className="flex flex-wrap items-center gap-4 text-sm text-textMuted">
-              <span>👍 {reactionCounts.like}</span>
-              <span>👎 {reactionCounts.fire}</span>
-              <span>💬 {post.replyCount}</span>
-            </div>
-          </Card>
+          <PostCard post={post} onReply={() => setReplyTargetId(post.id)} />
           <Card className="space-y-4 p-5">
             <div className="flex items-center gap-2 font-semibold">
               <MessageCircle size={18} />
-              Comments
+              Thread
               <span className="rounded-full bg-surfaceAlt px-2 py-0.5 text-xs font-medium text-textMuted">{replies.length}</span>
             </div>
-            {replies.length ? (
-              <div className="space-y-3">
-                {replies.map((reply: Post) => {
-                  const replyAuthor = replyAuthors[reply.id] ?? null;
-                  const canDeleteReply = Boolean(currentUserProfile && (currentUserProfile.uid === reply.authorId || currentUserProfile.isModerator));
-
-                  if (!replyAuthor) {
-                    console.warn("[post-page] missing reply author profile", { replyId: reply.id, authorId: reply.authorId });
-                  }
-
-                  return (
-                    <ReplyCard
-                      key={reply.id}
-                      reply={reply}
-                      author={replyAuthor}
-                      parentAuthor={author}
-                      canDelete={canDeleteReply}
-                      onDelete={async () => {
-                        await deleteDoc(doc(db, "posts", reply.id));
-                        await updateDoc(doc(db, "posts", post.id), { replyCount: increment(-1) });
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            ) : (
+            {replies.length ? renderReplies(post.id) : (
               <p className="text-sm text-textMuted">No comments yet.</p>
             )}
-            <div className="flex gap-2">
-              <input
-                value={replyText}
-                onChange={(event) => setReplyText(event.target.value)}
-                maxLength={280}
-                placeholder="Write a reply..."
-                className="min-w-0 flex-1 rounded-full border border-border bg-transparent px-4 py-2 text-sm outline-none"
+            <div className="space-y-3 border-t border-border pt-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold">{replyTarget ? "Replying to a comment" : "Add a reply"}</p>
+                  <p className="text-sm text-textMuted">
+                    {replyTarget
+                      ? `Your reply will nest under ${getReplyContextLabel(replyTarget) ?? "this comment"}.`
+                      : "Replying here keeps the thread connected to the original post."}
+                  </p>
+                </div>
+                {replyTarget ? (
+                  <Button variant="secondary" size="sm" onClick={() => setReplyTargetId(null)}>
+                    Clear target
+                  </Button>
+                ) : null}
+              </div>
+              <PostComposer
+                parentPost={post}
+                replyToPost={replyTarget && replyTarget.id !== post.id ? replyTarget : undefined}
+                mode="reply"
+                onPosted={() => setReplyTargetId(null)}
               />
-              <Button
-                onClick={async () => {
-                  if (!user || !post || !replyText.trim()) {
-                    return;
-                  }
-
-                  await createPost({
-                    authorId: user.uid,
-                    content: replyText.trim(),
-                    imageURL: null,
-                    imageStoragePath: null,
-                    gifURL: null,
-                    parentPostId: post.id,
-                    repostedPostId: null,
-                    quotedPostId: null,
-                    tags: [],
-                    visibility: "public",
-                  });
-                  await updateDoc(doc(db, "posts", post.id), { replyCount: increment(1) });
-                  await addXpToUser(user.uid, 2);
-                  setReplyText("");
-                }}
-              >
-                Reply
-              </Button>
             </div>
           </Card>
         </div>
@@ -1375,6 +1315,15 @@ export function ChatPage() {
 export function NotificationsPage() {
   const { user } = useAuth();
   const [items, setItems] = useState<NotificationItem[]>([]);
+  const unreadCount = items.filter((item) => !item.read).length;
+
+  async function handleMarkRead(notificationId: string, read: boolean) {
+    if (read) {
+      return;
+    }
+
+    await markNotificationRead(notificationId);
+  }
 
   useEffect(() => {
     if (!user) {
@@ -1386,16 +1335,155 @@ export function NotificationsPage() {
   }, [user]);
 
   return (
-    <PageFrame title="Notifications" subtitle="Reward, follow, mention, reply, and badge events with read states and filtering.">
-      <Card className="space-y-3 p-6">
-        {(items.length ? items : notifications).map((item) => (
-          <div key={item.id} className="rounded-2xl border border-border p-4">
-            <p className="font-semibold">{item.title}</p>
-            <p className="text-sm text-textMuted">{item.body}</p>
+    <PageFrame title="Notifications" subtitle="Replies, ratings, rotten tomatoes, level-ups, rewards, follows, and moderator reports all land here.">
+      <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
+        <Card className="space-y-3 p-5">
+          <div>
+            <p className="font-semibold">Inbox</p>
+            <p className="text-sm text-textMuted">Unread: {unreadCount}</p>
           </div>
-        ))}
-      </Card>
+          <div className="space-y-2 text-sm text-textMuted">
+            <p>Total notifications: {items.length}</p>
+            <p>{items.some((item) => item.type === "report") ? "Moderator reports available" : "No moderator reports right now"}</p>
+          </div>
+        </Card>
+
+        <Card className="space-y-3 p-4">
+          {(items.length ? items : notifications).length ? (items.length ? items : notifications).map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`block w-full rounded-2xl border p-4 text-left transition ${item.read ? "border-border bg-surface" : "border-[color:var(--accent)]/35 bg-[color:var(--accent)]/6"}`}
+              onClick={() => void handleMarkRead(item.id, item.read)}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold">{item.title}</p>
+                  <p className="mt-1 text-sm text-textMuted">{item.body}</p>
+                </div>
+                {!item.read ? <span className="rounded-full bg-[color:var(--accent)] px-2 py-0.5 text-[10px] font-semibold text-white">New</span> : null}
+              </div>
+              <p className="mt-3 text-xs text-textMuted">{new Date(item.createdAt).toLocaleString()}</p>
+            </button>
+          )) : (
+            <div className="rounded-2xl border border-border p-6 text-sm text-textMuted">No notifications yet.</div>
+          )}
+        </Card>
+      </div>
     </PageFrame>
+  );
+}
+
+function FollowListModal({
+  open,
+  title,
+  currentUserId,
+  profileUserId,
+  users,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  currentUserId: string;
+  profileUserId: string;
+  users: UserProfile[];
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const [followingIds, setFollowingIds] = useState<string[]>([]);
+  const [pendingUserId, setPendingUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || !currentUserId) {
+      setFollowingIds([]);
+      return;
+    }
+
+    return subscribeToFollowingIds(currentUserId, setFollowingIds);
+  }, [currentUserId, open]);
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 p-4 backdrop-blur-sm">
+      <div className="mx-auto max-w-lg rounded-[2rem] border border-border bg-canvas p-4 shadow-panel">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">{title}</h2>
+            <p className="text-sm text-textMuted">{users.length} {users.length === 1 ? "person" : "people"}</p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
+        </div>
+        <div className="space-y-3">
+          {users.length ? users.map((profile) => {
+            const isOwn = profile.uid === currentUserId;
+            const isProfileOwner = profile.uid === profileUserId;
+            const isFollowing = followingIds.includes(profile.uid);
+
+            return (
+              <div key={profile.uid} className="flex items-center gap-3 rounded-2xl border border-border p-3">
+                <button type="button" className="shrink-0" onClick={() => {
+                  navigate(`/profile/${profile.handle}`);
+                  onClose();
+                }}>
+                  <Avatar name={profile.displayName} src={profile.photoURL} className="h-11 w-11 rounded-2xl" />
+                </button>
+                <div className="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    className="block text-left font-semibold hover:underline"
+                    onClick={() => {
+                      navigate(`/profile/${profile.handle}`);
+                      onClose();
+                    }}
+                  >
+                    {profile.displayName}
+                  </button>
+                  <p className="text-sm text-textMuted">@{profile.handle}</p>
+                </div>
+                {!currentUserId || isOwn ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      navigate(`/profile/${profile.handle}`);
+                      onClose();
+                    }}
+                  >
+                    {isOwn ? "You" : "View"}
+                  </Button>
+                ) : (
+                  <Button
+                    variant={isFollowing ? "secondary" : (isProfileOwner ? "primary" : "ghost")}
+                    size="sm"
+                    disabled={pendingUserId === profile.uid}
+                    onClick={() => {
+                      void (async () => {
+                        setPendingUserId(profile.uid);
+                        try {
+                          await setFollowingRelationship(currentUserId, profile.uid, !isFollowing);
+                        } catch (error) {
+                          console.error("Failed to toggle follow relationship", error);
+                          toast.error("Follow action failed");
+                        } finally {
+                          setPendingUserId(null);
+                        }
+                      })();
+                    }}
+                  >
+                    {pendingUserId === profile.uid ? "Saving..." : isFollowing ? "Following" : "Follow"}
+                  </Button>
+                )}
+              </div>
+            );
+          }) : (
+            <div className="rounded-2xl border border-border p-6 text-sm text-textMuted">No users to show yet.</div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

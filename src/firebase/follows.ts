@@ -130,3 +130,16 @@ export function subscribeToFollowingIds(followerId: string, onChange: (following
     );
   });
 }
+
+export function subscribeToFollowerIds(followingId: string, onChange: (followerIds: string[]) => void): Unsubscribe {
+  const followersQuery = query(collection(db, COLLECTIONS.follows), where("followingId", "==", followingId));
+
+  return onSnapshot(followersQuery, (snapshot) => {
+    onChange(
+      snapshot.docs.map((document) => {
+        const data = document.data() as FollowRelationship;
+        return data.followerId;
+      }),
+    );
+  });
+}

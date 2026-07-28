@@ -13,7 +13,7 @@ import {
   Trophy,
   X,
 } from "lucide-react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
 import { Avatar } from "@/components/common/avatar";
 import { Button } from "@/components/common/button";
@@ -45,6 +45,7 @@ const navItems = [
 export function AppLayout() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { isComposerOpen, setComposerOpen } = useUiStore();
   const [profile, setProfile] = useState<UserProfile>(users[0]);
   const [followCounts, setFollowCounts] = useState({ followers: users[0].followerCount, following: users[0].followingCount });
@@ -134,6 +135,10 @@ export function AppLayout() {
       previousRankRef.current = rank;
     });
   }, [user]);
+
+  useEffect(() => {
+    setComposerOpen(false);
+  }, [location.pathname, setComposerOpen]);
 
   if (!user) {
     return (

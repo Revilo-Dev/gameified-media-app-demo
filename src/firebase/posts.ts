@@ -139,19 +139,21 @@ export async function createPost(input: CreatePostInput) {
   });
 }
 
-function reactionDocId(postId: string, userId: string) {
-  return `${postId}_${userId}`;
+function reactionDocId(postId: string, userId: string, type: "star" | "rotten") {
+  return `${postId}_${userId}_${type}`;
 }
 
 function getStarRatingXpReward(stars: number) {
-  if (stars === 5) return 500;
-  if (stars === 4) return 300;
-  if (stars === 3) return 100;
+  if (stars === 5) return 10;
+  if (stars === 4) return 8;
+  if (stars === 3) return 5;
+  if (stars === 2) return 3;
+  if (stars === 1) return 1;
   return 0;
 }
 
 export async function ratePost(postId: string, user: UserProfile, stars: number) {
-  const reactionRef = doc(db, COLLECTIONS.reactions, reactionDocId(postId, user.uid));
+  const reactionRef = doc(db, COLLECTIONS.reactions, reactionDocId(postId, user.uid, "star"));
   const postRef = doc(db, COLLECTIONS.posts, postId);
   let authorId: string | null = null;
 
@@ -187,16 +189,16 @@ export async function ratePost(postId: string, user: UserProfile, stars: number)
     });
   });
 
-  if (authorId && authorId !== user.uid) {
-    const xpReward = getStarRatingXpReward(stars);
-    if (xpReward > 0) {
-      await addXpToUser(authorId, xpReward);
-    }
+  const xpReward = getStarRatingXpReward(stars);
+  if (xpReward > 0) {
+    await addXpToUser(user.uid, xpReward);
+  }
 
+  if (authorId && authorId !== user.uid) {
     await createNotification({
       type: "reaction",
       title: "New star rating",
-      body: `${user.displayName} rated your post ${stars}/5 stars.${xpReward > 0 ? ` You earned ${xpReward} XP.` : ""}`,
+      body: `${user.displayName} rated your post ${stars}/5 stars.`,
       actorId: user.uid,
       userId: authorId,
       postId,
@@ -205,7 +207,7 @@ export async function ratePost(postId: string, user: UserProfile, stars: number)
 }
 
 export function subscribeToPostReaction(postId: string, userId: string, onChange: (reaction: { type: string; stars?: number } | null) => void): Unsubscribe {
-  return onSnapshot(doc(db, COLLECTIONS.reactions, reactionDocId(postId, userId)), (snapshot) => {
+  return onSnapshot(doc(db, COLLECTIONS.reactions, reactionDocId(postId, userId, "star")), (snapshot) => {
     if (!snapshot.exists()) {
       onChange(null);
       return;
@@ -215,12 +217,41 @@ export function subscribeToPostReaction(postId: string, userId: string, onChange
   });
 }
 
+export function subscribeToPostReactions(
+  postId: string,
+  userId: string,
+  onChange: (reaction: { stars: number; hasRottenTomato: boolean }) => void,
+): Unsubscribe {
+  const starRef = doc(db, COLLECTIONS.reactions, reactionDocId(postId, userId, "star"));
+  const rottenRef = doc(db, COLLECTIONS.reactions, reactionDocId(postId, userId, "rotten"));
+
+  let stars = 0;
+  let hasRottenTomato = false;
+
+  const emit = () => onChange({ stars, hasRottenTomato });
+
+  const unsubscribeStar = onSnapshot(starRef, (snapshot) => {
+    stars = snapshot.exists() ? Number(snapshot.data().stars ?? 0) : 0;
+    emit();
+  });
+
+  const unsubscribeRotten = onSnapshot(rottenRef, (snapshot) => {
+    hasRottenTomato = snapshot.exists();
+    emit();
+  });
+
+  return () => {
+    unsubscribeStar();
+    unsubscribeRotten();
+  };
+}
+
 export async function deletePost(postId: string) {
   await deleteDoc(doc(db, COLLECTIONS.posts, postId));
 }
 
 export async function throwRottenTomato(postId: string, user: UserProfile) {
-  const reactionRef = doc(db, COLLECTIONS.reactions, reactionDocId(postId, user.uid));
+  const reactionRef = doc(db, COLLECTIONS.reactions, reactionDocId(postId, user.uid, "rotten"));
   const postRef = doc(db, COLLECTIONS.posts, postId);
   let shouldDelete = false;
   let authorId: string | null = null;
@@ -241,7 +272,7 @@ export async function throwRottenTomato(postId: string, user: UserProfile) {
     }
 
     if (reactionSnapshot.exists()) {
-      throw new Error("You already reacted to this post.");
+      throw new Error("You already threw a rotten tomato at this post.");
     }
 
     const currentGems = Number(userSnapshot.data().gems ?? 0);
@@ -295,19 +326,50 @@ export async function createReply(input: CreatePostInput) {
     await updateDoc(doc(db, COLLECTIONS.posts, input.parentPostId), { replyCount: increment(1) });
   }
 
+  if (input.replyToPostId && input.replyToPostId !== input.parentPostId) {
+    await updateDoc(doc(db, COLLECTIONS.posts, input.replyToPostId), { replyCount: increment(1) });
+  }
+
   return createdReply;
+}
+
+export async function removePostEmbed(postId: string) {
+  const postRef = doc(db, COLLECTIONS.posts, postId);
+  const snapshot = await getDoc(postRef);
+
+  if (!snapshot.exists()) {
+    throw new Error("Post not found.");
+  }
+
+  const data = snapshot.data();
+  await deleteStorageObject(typeof data.imageStoragePath === "string" ? data.imageStoragePath : null);
+  await updateDoc(postRef, {
+    imageURL: null,
+    imageStoragePath: null,
+    gifURL: null,
+    poll: null,
+  });
 }
 
 async function deletePostArtifacts(postId: string) {
   const batch = writeBatch(db);
-  const [reactionsSnapshot, bookmarksSnapshot, notificationsSnapshot, childRepliesSnapshot] = await Promise.all([
+  const [reactionsSnapshot, bookmarksSnapshot, notificationsSnapshot, childRepliesSnapshot, threadedRepliesSnapshot] = await Promise.all([
     getDocs(query(collection(db, COLLECTIONS.reactions), where("postId", "==", postId))),
     getDocs(query(collection(db, COLLECTIONS.bookmarks), where("postId", "==", postId))),
     getDocs(query(collection(db, COLLECTIONS.notifications), where("postId", "==", postId))),
     getDocs(query(collection(db, COLLECTIONS.posts), where("parentPostId", "==", postId))),
+    getDocs(query(collection(db, COLLECTIONS.posts), where("replyToPostId", "==", postId))),
   ]);
+  const nestedReplyIds = new Set<string>();
+  const nestedReplies = [...childRepliesSnapshot.docs, ...threadedRepliesSnapshot.docs].filter((replyDocument) => {
+    if (nestedReplyIds.has(replyDocument.id)) {
+      return false;
+    }
+    nestedReplyIds.add(replyDocument.id);
+    return true;
+  });
 
-  childRepliesSnapshot.docs.forEach((replyDocument) => {
+  nestedReplies.forEach((replyDocument) => {
     batch.delete(replyDocument.ref);
   });
   reactionsSnapshot.docs.forEach((reactionDocument) => {
@@ -322,7 +384,7 @@ async function deletePostArtifacts(postId: string) {
 
   await batch.commit();
 
-  for (const replyDocument of childRepliesSnapshot.docs) {
+  for (const replyDocument of nestedReplies) {
     const replyData = replyDocument.data();
     await deleteStorageObject(typeof replyData.imageStoragePath === "string" ? replyData.imageStoragePath : null);
   }
@@ -338,7 +400,15 @@ export async function deletePostCascade(postId: string) {
 
   const data = snapshot.data();
   const parentPostId = typeof data.parentPostId === "string" ? data.parentPostId : null;
+  const replyToPostId = typeof data.replyToPostId === "string" ? data.replyToPostId : null;
   const imageStoragePath = typeof data.imageStoragePath === "string" ? data.imageStoragePath : null;
+
+  if (parentPostId) {
+    const threadedChildrenSnapshot = await getDocs(query(collection(db, COLLECTIONS.posts), where("replyToPostId", "==", postId)));
+    for (const childReply of threadedChildrenSnapshot.docs) {
+      await deletePostCascade(childReply.id);
+    }
+  }
 
   await deletePostArtifacts(postId);
   await deleteDoc(postRef);
@@ -346,6 +416,10 @@ export async function deletePostCascade(postId: string) {
 
   if (parentPostId) {
     await updateDoc(doc(db, COLLECTIONS.posts, parentPostId), { replyCount: increment(-1) });
+  }
+
+  if (replyToPostId && replyToPostId !== parentPostId) {
+    await updateDoc(doc(db, COLLECTIONS.posts, replyToPostId), { replyCount: increment(-1) });
   }
 }
 

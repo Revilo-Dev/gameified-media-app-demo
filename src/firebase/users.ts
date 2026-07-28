@@ -2,6 +2,7 @@ import { collection, doc, getDoc, limit, onSnapshot, orderBy, query, runTransact
 import type { User } from "firebase/auth";
 import { db } from "@/firebase/config";
 import { COLLECTIONS } from "@/firebase/firestore";
+import { createNotification } from "@/firebase/notifications";
 import { getLevelForXp } from "@/constants/gamification";
 import type { ThemeMode, UserProfile } from "@/types/models";
 import { users as demoUsers } from "@/lib/demo-data";
@@ -96,6 +97,17 @@ export async function addXpToUser(userId: string, xpDelta: number) {
       updatedAt: serverTimestamp(),
     });
   });
+
+  if (nextLevel > previousLevel) {
+    await createNotification({
+      type: "level",
+      title: "Level up",
+      body: `You reached level ${nextLevel}.`,
+      actorId: userId,
+      userId,
+      postId: null,
+    });
+  }
 
   return { previousLevel, nextLevel, nextXp };
 }

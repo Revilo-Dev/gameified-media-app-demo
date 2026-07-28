@@ -229,7 +229,7 @@ export function PostComposer({
     };
 
     const created = isReply ? await createReply(payload) : await createPost(payload);
-    await addXpToUser(user.uid, isReply ? 2 : 5);
+    await addXpToUser(user.uid, 10);
     window.localStorage.setItem(storageKey, now.toISOString());
 
     if (parentPost && parentPost.authorId !== user.uid && profile) {

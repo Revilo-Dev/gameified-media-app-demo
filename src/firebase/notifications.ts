@@ -3,13 +3,11 @@ import {
   collection,
   doc,
   getDoc,
-  limit,
   onSnapshot,
-  orderBy,
-  query,
   serverTimestamp,
   updateDoc,
   where,
+  query,
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "@/firebase/config";
@@ -48,8 +46,6 @@ export function subscribeToNotifications(userId: string, onChange: (notification
   const notificationsQuery = query(
     collection(db, COLLECTIONS.notifications),
     where("userId", "==", userId),
-    orderBy("createdAt", "desc"),
-    limit(50),
   );
 
   return onSnapshot(notificationsQuery, (snapshot) => {
@@ -59,7 +55,9 @@ export function subscribeToNotifications(userId: string, onChange: (notification
           ...(document.data() as Omit<NotificationItem, "id">),
           createdAt: normalizeCreatedAt(document.data().createdAt),
         } as Omit<NotificationItem, "id">),
-      }));
+      }))
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+      .slice(0, 50);
     writeCache(cacheKey, nextNotifications);
     onChange(nextNotifications);
   });

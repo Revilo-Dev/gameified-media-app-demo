@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Crown, Gem, Globe2, Hammer, ImagePlus, Lock, MapPin, MessageCircle, Palette, Search, Send, Sparkles, Trash2, Unlock } from "lucide-react";
+import { Bell, Crown, Gem, Globe2, Hammer, ImagePlus, Lock, MapPin, MessageCircle, Palette, Search, Send, Sparkles, Star, Trash2, TriangleAlert, Unlock, UserPlus } from "lucide-react";
 import { deleteDoc, doc, increment, updateDoc } from "firebase/firestore";
 import { auth, db } from "@/firebase/config";
 import { Card } from "@/components/common/card";
@@ -76,8 +76,36 @@ function getRepliesLabel(count: number) {
   return `${count} ${count === 1 ? "reply" : "replies"}`;
 }
 
+function getNotificationVisual(type: NotificationItem["type"]) {
+  switch (type) {
+    case "reply":
+      return { icon: MessageCircle, tint: "text-sky-300", chip: "bg-sky-500/15 text-sky-300", label: "Reply" };
+    case "reaction":
+      return { icon: Star, tint: "text-amber-300", chip: "bg-amber-500/15 text-amber-300", label: "Reaction" };
+    case "follow":
+      return { icon: UserPlus, tint: "text-emerald-300", chip: "bg-emerald-500/15 text-emerald-300", label: "Follow" };
+    case "report":
+      return { icon: TriangleAlert, tint: "text-[color:var(--error)]", chip: "bg-[color:var(--error)]/15 text-[color:var(--error)]", label: "Report" };
+    case "level":
+    case "reward":
+    case "leaderboard":
+      return { icon: Sparkles, tint: "text-fuchsia-300", chip: "bg-fuchsia-500/15 text-fuchsia-300", label: "Progress" };
+    default:
+      return { icon: Bell, tint: "text-textMuted", chip: "bg-surfaceAlt text-textMuted", label: "Alert" };
+  }
+}
+
 const changelogEntries = [
-    {
+  {
+    version: "V0.58",
+    date: "July 28, 2026",
+    items: [
+      "Star-rating XP is now awarded only on a user's first rating for a post, so changing a rating no longer grants repeat XP.",
+      "Comment threads can now be collapsed and expanded inline, making long nested conversations much easier to scan.",
+      "Auto-generated handles are now forced to be unique at account creation, and profile handle edits still check availability before save.",
+    ],
+  },
+  {
     version: "V0.56",
     date: "July 28, 2026",
     items: [
@@ -1162,6 +1190,7 @@ export function PostPage() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [profilesById, setProfilesById] = useState<Record<string, (typeof users)[number] | null>>({});
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
+  const [collapsedReplyIds, setCollapsedReplyIds] = useState<Record<string, boolean>>({});
 
   useEffect(() => subscribeToPosts(setPosts), []);
 
@@ -1230,6 +1259,13 @@ export function PostPage() {
     return targetProfile ? `@${targetProfile.handle}` : null;
   }
 
+  function toggleReplyThread(replyId: string) {
+    setCollapsedReplyIds((current) => ({
+      ...current,
+      [replyId]: !current[replyId],
+    }));
+  }
+
   function renderReplies(parentId: string, depth = 0): ReactNode {
     const children = groupedReplies.get(parentId) ?? [];
     if (!children.length) {
@@ -1238,18 +1274,36 @@ export function PostPage() {
 
     return (
       <div className="space-y-3">
-        {children.map((reply) => (
-          <div key={reply.id} className={depth ? "ml-4 border-l border-border pl-4 sm:ml-6 sm:pl-5" : ""}>
-            <PostCard
-              post={reply}
-              replyContextLabel={getReplyContextLabel(reply)}
-              onReply={() => setReplyTargetId(reply.id)}
-            />
-            <div className="mt-3">
-              {renderReplies(reply.id, depth + 1)}
+        {children.map((reply) => {
+          const nestedChildren = groupedReplies.get(reply.id) ?? [];
+          const isCollapsed = Boolean(collapsedReplyIds[reply.id]);
+
+          return (
+            <div key={reply.id} className={depth ? "ml-4 border-l border-border pl-4 sm:ml-6 sm:pl-5" : ""}>
+              <PostCard
+                post={reply}
+                replyContextLabel={getReplyContextLabel(reply)}
+                onReply={() => setReplyTargetId(reply.id)}
+              />
+              {nestedChildren.length ? (
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    className="text-xs font-semibold text-[color:var(--accent)]"
+                    onClick={() => toggleReplyThread(reply.id)}
+                  >
+                    {isCollapsed ? `Show ${nestedChildren.length} repl${nestedChildren.length === 1 ? "y" : "ies"}` : "Hide thread"}
+                  </button>
+                </div>
+              ) : null}
+              {!isCollapsed ? (
+                <div className="mt-3">
+                  {renderReplies(reply.id, depth + 1)}
+                </div>
+              ) : null}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     );
   }
@@ -1441,31 +1495,66 @@ export function NotificationsPage() {
   }, [user]);
 
   return (
-    <PageFrame title="Notifications" subtitle="A live list of your notifications.">
+    <PageFrame title="Notifications" subtitle="Live activity from replies, ratings, follows, reports, rotten tomatoes, and level-ups.">
       {!user ? (
         <Card className="p-6 text-sm text-textMuted">Sign in to view your notifications.</Card>
       ) : (
-        <Card className="space-y-3 p-4">
-          {items.length ? items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`block w-full rounded-2xl border p-4 text-left transition ${item.read ? "border-border bg-surface" : "border-[color:var(--accent)]/35 bg-[color:var(--accent)]/6"}`}
-              onClick={() => void handleMarkRead(item.id, item.read)}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold">{item.title}</p>
-                  <p className="mt-1 text-sm text-textMuted">{item.body}</p>
-                </div>
-                {!item.read ? <span className="rounded-full bg-[color:var(--accent)] px-2 py-0.5 text-[10px] font-semibold text-white">New</span> : null}
+        <div className="space-y-4">
+          <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <div>
+              <p className="text-sm font-semibold">Live activity</p>
+              <p className="text-sm text-textMuted">{items.length ? `${items.length} notification${items.length === 1 ? "" : "s"}` : "No notifications yet"}</p>
+            </div>
+            {items.some((item) => !item.read) ? (
+              <div className="rounded-full bg-[color:var(--error)]/15 px-3 py-1 text-xs font-semibold text-[color:var(--error)]">
+                {items.filter((item) => !item.read).length} unread
               </div>
-              <p className="mt-3 text-xs text-textMuted">{new Date(item.createdAt).toLocaleString()}</p>
-            </button>
-          )) : (
-            <div className="rounded-2xl border border-border p-6 text-sm text-textMuted">No notifications yet.</div>
+            ) : null}
+          </Card>
+
+          <Card className="space-y-3 p-4">
+          {items.length ? items.map((item) => {
+            const visual = getNotificationVisual(item.type);
+            const Icon = visual.icon;
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`block w-full rounded-3xl border p-4 text-left transition ${
+                  item.read
+                    ? "border-border bg-surface hover:bg-surfaceAlt/40"
+                    : "border-[color:var(--accent)]/25 bg-[color:var(--accent)]/8 hover:bg-[color:var(--accent)]/12"
+                }`}
+                onClick={() => void handleMarkRead(item.id, item.read)}
+              >
+                <div className="flex items-start gap-4">
+                  <div className={`mt-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-surfaceAlt ${visual.tint}`}>
+                    <Icon size={18} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold">{item.title}</p>
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${visual.chip}`}>
+                          {visual.label}
+                        </span>
+                      </div>
+                      {!item.read ? <span className="rounded-full bg-[color:var(--error)] px-2 py-0.5 text-[10px] font-semibold text-white">New</span> : null}
+                    </div>
+                    <p className="mt-1 text-sm text-textMuted">{item.body}</p>
+                    <p className="mt-3 text-xs text-textMuted">{new Date(item.createdAt).toLocaleString()}</p>
+                  </div>
+                </div>
+              </button>
+            );
+          }) : (
+            <div className="rounded-3xl border border-dashed border-border p-8 text-center text-sm text-textMuted">
+              Notifications will appear here as people reply, rate posts, follow you, report content, or when your account levels up.
+            </div>
           )}
-        </Card>
+          </Card>
+        </div>
       )}
     </PageFrame>
   );

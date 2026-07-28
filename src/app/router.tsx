@@ -44,6 +44,7 @@ export const router = createBrowserRouter([
       { path: "post/:postId", element: lazyElement(() => import("@/pages/simple-pages"), "PostPage") },
       { path: "chat", element: lazyElement(() => import("@/pages/simple-pages"), "ChatPage") },
       { path: "notifications", element: lazyElement(() => import("@/pages/simple-pages"), "NotificationsPage") },
+      { path: "premium", element: lazyElement(() => import("@/pages/simple-pages"), "PremiumPage") },
       { path: "bookmarks", element: lazyElement(() => import("@/pages/simple-pages"), "BookmarksPage") },
       { path: "arcade", element: lazyElement(() => import("@/pages/simple-pages"), "ArcadePage") },
       { path: "market", element: lazyElement(() => import("@/pages/simple-pages"), "MarketPage") },

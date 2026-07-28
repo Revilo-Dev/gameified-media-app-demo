@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Bell,
   Bookmark,
+  Crown,
   Gem,
   Gamepad2,
   Home,
@@ -15,6 +16,7 @@ import {
 } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
+import { toast } from "sonner";
 import { Avatar } from "@/components/common/avatar";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
@@ -52,6 +54,7 @@ export function AppLayout() {
   const [notificationCount, setNotificationCount] = useState(0);
   const [claimedToday, setClaimedToday] = useState(false);
   const previousRankRef = useRef<number | null>(null);
+  const seenNotificationIdsRef = useRef<string[] | null>(null);
   const profilePath = `/profile/${profile.handle}`;
   const rewardKey = "pulsearc-daily-gems";
   const profileCacheKey = user ? `cache:sidebar-profile:${user.uid}` : null;
@@ -106,11 +109,22 @@ export function AppLayout() {
   useEffect(() => {
     if (!user) {
       setNotificationCount(0);
+      seenNotificationIdsRef.current = null;
       return;
     }
 
     return subscribeToNotifications(user.uid, (notifications) => {
       setNotificationCount(notifications.filter((item) => !item.read).length);
+
+      const previousIds = seenNotificationIdsRef.current;
+      const nextIds = notifications.map((item) => item.id);
+      if (previousIds) {
+        const newestNotification = notifications.find((item) => !previousIds.includes(item.id));
+        if (newestNotification) {
+          toast(newestNotification.title, { description: newestNotification.body });
+        }
+      }
+      seenNotificationIdsRef.current = nextIds;
     });
   }, [user]);
 
@@ -186,9 +200,12 @@ export function AppLayout() {
               <Gem size={16} />
               {claimedToday ? "Daily gems claimed" : "Redeem daily gems"}
             </Button>
+            <NavLink to="/premium" className="flex items-center gap-2 rounded-full bg-[color:var(--accent)] px-4 py-2 text-sm font-semibold text-white shadow-panel">
+              <Crown size={16} /> Go Premium
+            </NavLink>
             <NavLink to="/notifications" className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm">
               <Bell size={16} /> Notifications
-              {notificationCount ? <span className="ml-auto rounded-full bg-[color:var(--accent)] px-2 py-0.5 text-xs font-semibold text-white">{notificationCount}</span> : null}
+              {notificationCount ? <span className="ml-auto rounded-full bg-[color:var(--error)] px-2 py-0.5 text-xs font-semibold text-white">{notificationCount}</span> : null}
             </NavLink>
             <NavLink to="/bookmarks" className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm">
               <Bookmark size={16} /> Bookmarks

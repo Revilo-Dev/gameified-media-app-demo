@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, limit, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, type Unsubscribe } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, type Unsubscribe } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import { db } from "@/firebase/config";
 import { COLLECTIONS } from "@/firebase/firestore";
@@ -233,4 +233,10 @@ export function subscribeToUserProfileByHandle(handle: string, onChange: (profil
     const document = snapshot.docs[0];
     onChange({ ...(document.data() as UserProfile), uid: document.id });
   });
+}
+
+export async function getModeratorIds() {
+  const moderatorsQuery = query(collection(db, COLLECTIONS.users), where("isModerator", "==", true), limit(50));
+  const snapshot = await getDocs(moderatorsQuery);
+  return snapshot.docs.map((document) => document.id);
 }

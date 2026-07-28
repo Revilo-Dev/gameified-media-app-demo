@@ -5,14 +5,14 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Crown, Gem, Globe2, ImagePlus, Lock, MapPin, MessageCircle, Palette, Search, Send, Trash2, Unlock } from "lucide-react";
+import { Crown, Gem, Globe2, Hammer, ImagePlus, Lock, MapPin, MessageCircle, Palette, Search, Send, Sparkles, Trash2, Unlock } from "lucide-react";
 import { deleteDoc, doc, increment, updateDoc } from "firebase/firestore";
 import { auth, db } from "@/firebase/config";
 import { Card } from "@/components/common/card";
 import { Button } from "@/components/common/button";
 import { XpProgress } from "@/components/gamification/xp-progress";
 import { SlotMachine } from "@/components/gamification/slot-machine";
-import { conversations, messages, notifications, shopItems, users } from "@/lib/demo-data";
+import { conversations, messages, shopItems, users } from "@/lib/demo-data";
 import { bannerPresets } from "@/lib/banner-presets";
 import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/auth";
 import { useAuth } from "@/app/auth-provider";
@@ -344,42 +344,44 @@ export function ProfilePage() {
       <Card className="overflow-hidden p-0">
         <div className="h-36 w-full sm:h-44" style={formatBannerStyle(user)} />
         <div className="space-y-4 p-5 sm:p-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex flex-col gap-4">
             <div className="flex items-end gap-4">
               <div className="-mt-16 shrink-0 rounded-[1.75rem] border-4 border-canvas bg-canvas sm:-mt-20">
                 <Avatar name={user.displayName} src={user.photoURL} className="h-20 w-20 rounded-3xl sm:h-24 sm:w-24" />
               </div>
-              <div className="min-w-0 pb-1">
-                <div className="flex flex-wrap items-center gap-3">
-                  <p className="text-2xl font-bold">{user.displayName}</p>
-                  <Button
-                    variant={isOwnProfile || isFollowing ? "secondary" : "primary"}
-                    className="h-9"
-                    disabled={isTogglingFollow}
-                    onClick={() => {
-                      if (isOwnProfile) {
-                        setIsEditorOpen(true);
-                        return;
-                      }
-                      if (!currentUserId) {
-                        return;
-                      }
-                      void (async () => {
-                        setIsTogglingFollow(true);
-                        try {
-                          await setFollowingRelationship(currentUserId, user.uid, !isFollowing);
-                        } catch (error) {
-                          console.error("Failed to toggle follow relationship", error);
-                          toast.error("Follow action failed");
-                        } finally {
-                          setIsTogglingFollow(false);
+              <div className="min-w-0 flex-1 pb-1">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <p className="min-w-0 text-2xl font-bold">{user.displayName}</p>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                    <Button
+                      variant={isOwnProfile || isFollowing ? "secondary" : "primary"}
+                      className="h-9"
+                      disabled={isTogglingFollow}
+                      onClick={() => {
+                        if (isOwnProfile) {
+                          setIsEditorOpen(true);
+                          return;
                         }
-                      })();
-                    }}
-                  >
-                    {isOwnProfile ? "Edit profile" : isTogglingFollow ? "Saving..." : isFollowing ? "Following" : "Follow"}
-                  </Button>
-                  {currentUserId && !isOwnProfile ? <ModeratorBanButton targetUserId={user.uid} /> : null}
+                        if (!currentUserId) {
+                          return;
+                        }
+                        void (async () => {
+                          setIsTogglingFollow(true);
+                          try {
+                            await setFollowingRelationship(currentUserId, user.uid, !isFollowing);
+                          } catch (error) {
+                            console.error("Failed to toggle follow relationship", error);
+                            toast.error("Follow action failed");
+                          } finally {
+                            setIsTogglingFollow(false);
+                          }
+                        })();
+                      }}
+                    >
+                      {isOwnProfile ? "Edit profile" : isTogglingFollow ? "Saving..." : isFollowing ? "Following" : "Follow"}
+                    </Button>
+                    {currentUserId && !isOwnProfile ? <ModeratorBanButton targetUserId={user.uid} /> : null}
+                  </div>
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-textMuted">
                   <span>@{user.handle}</span>
@@ -902,7 +904,7 @@ function ModeratorBanButton({ targetUserId }: { targetUserId: string }) {
   return (
     <Button
       variant="secondary"
-      className="gap-2 text-red-500"
+      className="h-9 px-3 text-red-500"
       disabled={isBanning}
       onClick={async () => {
         const confirmed = window.confirm("Ban this user? This removes their account, posts, and replies.");
@@ -923,8 +925,58 @@ function ModeratorBanButton({ targetUserId }: { targetUserId: string }) {
         }
       }}
     >
-      {isBanning ? "Banning..." : "Ban user"}
+      <Hammer size={16} />
     </Button>
+  );
+}
+
+export function PremiumPage() {
+  return (
+    <PageFrame title="Premium" subtitle="Upgrade for banner uploads, premium flair, and a more expressive profile.">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(18rem,0.7fr)]">
+        <Card className="space-y-5 overflow-hidden p-0">
+          <div className="bg-[radial-gradient(circle_at_top_left,_rgba(255,107,87,0.35),_transparent_42%),linear-gradient(135deg,#20131a_0%,#402029_52%,#ff6b57_100%)] p-6 text-white">
+            <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em]">
+              <Sparkles size={14} />
+              PulseArc Premium
+            </div>
+            <h2 className="mt-4 max-w-xl text-3xl font-bold">Make your profile feel like a headline, not a placeholder.</h2>
+            <p className="mt-3 max-w-2xl text-sm text-white/80">Premium unlocks banner image uploads, richer visual identity, and elevated profile presentation across the app.</p>
+          </div>
+          <div className="grid gap-4 p-6 md:grid-cols-2">
+            <div className="rounded-3xl border border-border bg-surfaceAlt/40 p-5">
+              <p className="font-semibold">Included</p>
+              <div className="mt-3 space-y-3 text-sm text-textMuted">
+                <p>Banner image uploads instead of color-only headers.</p>
+                <p>Premium identity badge across profile and posts.</p>
+                <p>More expressive profile styling for creator and moderator accounts.</p>
+              </div>
+            </div>
+            <div className="rounded-3xl border border-border bg-surfaceAlt/40 p-5">
+              <p className="font-semibold">Why upgrade</p>
+              <div className="mt-3 space-y-3 text-sm text-textMuted">
+                <p>Stand out in feeds with stronger visual branding.</p>
+                <p>Give your profile a proper hero treatment.</p>
+                <p>Keep your public presence feeling intentional and polished.</p>
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="space-y-4 p-6">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent)]">Upgrade plan</p>
+            <h3 className="mt-2 text-2xl font-bold">$8 / month</h3>
+            <p className="mt-2 text-sm text-textMuted">A simple premium tier for profile customization and account flair.</p>
+          </div>
+          <Button className="w-full gap-2">
+            <Crown size={16} />
+            Buy Premium
+          </Button>
+          <p className="text-xs text-textMuted">Checkout is placeholder-only in this demo, but this page is ready to become the real upgrade surface.</p>
+        </Card>
+      </div>
+    </PageFrame>
   );
 }
 
@@ -1326,7 +1378,6 @@ export function ChatPage() {
 export function NotificationsPage() {
   const { user } = useAuth();
   const [items, setItems] = useState<NotificationItem[]>([]);
-  const unreadCount = items.filter((item) => !item.read).length;
 
   async function handleMarkRead(notificationId: string, read: boolean) {
     if (read) {
@@ -1346,21 +1397,12 @@ export function NotificationsPage() {
   }, [user]);
 
   return (
-    <PageFrame title="Notifications" subtitle="Replies, ratings, rotten tomatoes, level-ups, rewards, follows, and moderator reports all land here.">
-      <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
-        <Card className="space-y-3 p-5">
-          <div>
-            <p className="font-semibold">Inbox</p>
-            <p className="text-sm text-textMuted">Unread: {unreadCount}</p>
-          </div>
-          <div className="space-y-2 text-sm text-textMuted">
-            <p>Total notifications: {items.length}</p>
-            <p>{items.some((item) => item.type === "report") ? "Moderator reports available" : "No moderator reports right now"}</p>
-          </div>
-        </Card>
-
+    <PageFrame title="Notifications" subtitle="A live list of your notifications.">
+      {!user ? (
+        <Card className="p-6 text-sm text-textMuted">Sign in to view your notifications.</Card>
+      ) : (
         <Card className="space-y-3 p-4">
-          {(items.length ? items : notifications).length ? (items.length ? items : notifications).map((item) => (
+          {items.length ? items.map((item) => (
             <button
               key={item.id}
               type="button"
@@ -1380,7 +1422,7 @@ export function NotificationsPage() {
             <div className="rounded-2xl border border-border p-6 text-sm text-textMuted">No notifications yet.</div>
           )}
         </Card>
-      </div>
+      )}
     </PageFrame>
   );
 }

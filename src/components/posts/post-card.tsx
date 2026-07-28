@@ -15,7 +15,7 @@ import { db } from "@/firebase/config";
 import { setFollowingRelationship, subscribeToFollowRelationship } from "@/firebase/follows";
 import { createNotification } from "@/firebase/notifications";
 import { deletePostCascade, ratePost, removePostEmbed, subscribeToPostReactions, throwRottenTomato } from "@/firebase/posts";
-import { getDemoUserById, subscribeToUserProfileById } from "@/firebase/users";
+import { getDemoUserById, getModeratorIds, subscribeToUserProfileById } from "@/firebase/users";
 import type { Post, UserProfile } from "@/types/models";
 
 function TomatoIcon({ className = "h-4 w-4" }: { className?: string }) {
@@ -236,7 +236,7 @@ export function PostCard({
                           return;
                         }
 
-                        const moderators = ["demo-user"];
+                        const moderators = await getModeratorIds();
                         await Promise.all(moderators.map((moderatorId) => createNotification({
                           type: "report",
                           title: "Post reported",

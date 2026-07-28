@@ -5,14 +5,14 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Bookmark, Crown, Gem, Globe2, ImagePlus, Lock, MapPin, MessageCircle, Palette, Search, Trash2, Unlock } from "lucide-react";
+import { Crown, Gem, Globe2, ImagePlus, Lock, MapPin, MessageCircle, Palette, Search, Send, Trash2, Unlock } from "lucide-react";
 import { deleteDoc, doc, increment, updateDoc } from "firebase/firestore";
 import { auth, db } from "@/firebase/config";
 import { Card } from "@/components/common/card";
 import { Button } from "@/components/common/button";
 import { XpProgress } from "@/components/gamification/xp-progress";
 import { SlotMachine } from "@/components/gamification/slot-machine";
-import { notifications, shopItems, triviaQuestions, users } from "@/lib/demo-data";
+import { conversations, messages, notifications, shopItems, users } from "@/lib/demo-data";
 import { bannerPresets } from "@/lib/banner-presets";
 import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/auth";
 import { useAuth } from "@/app/auth-provider";
@@ -25,12 +25,13 @@ import { setFollowingRelationship, subscribeToFollowCounts, subscribeToFollowRel
 import { useUiStore } from "@/store/use-ui-store";
 import { getXpProgress } from "@/constants/gamification";
 import { themePresets } from "@/lib/theme-presets";
+import { readCache, writeCache } from "@/lib/persistent-cache";
 import { banUserAccount } from "@/firebase/functions";
 import { subscribeToBookmarkedPosts } from "@/firebase/bookmarks";
 import { subscribeToNotifications } from "@/firebase/notifications";
 import { UserBadges } from "@/components/common/user-badges";
 import { PostCard } from "@/components/posts/post-card";
-import type { NotificationItem, Post } from "@/types/models";
+import type { Conversation, Message, NotificationItem, Post } from "@/types/models";
 
 function getFirebaseErrorMessage(error: unknown) {
   if (typeof error !== "object" || error === null) {
@@ -149,13 +150,12 @@ export function ExplorePage() {
     <PageFrame title="Explore" subtitle="Search, trends, suggested users, and popular posts are composed into one discovery surface for the demo." titleIcon={Search}>
       <Card className="p-6">
         <div className="grid gap-4 md:grid-cols-2">
-          <div>
-            <p className="font-semibold">Trending topics</p>
-            <p className="mt-2 text-sm text-textMuted">#community-design, #dark-mode, #daily-trivia</p>
-          </div>
-          <div>
-            <p className="font-semibold">Suggested users</p>
-            <p className="mt-2 text-sm text-textMuted">{users.map((user) => `@${user.handle}`).join(", ")}</p>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Search size={16} />
+              <p className="font-semibold">Search</p>
+            </div>
+            <p className="text-sm text-textMuted">Search is not functional in the demo, but this surface would normally show search results for posts and users.</p>
           </div>
         </div>
       </Card>
@@ -457,11 +457,6 @@ export function SettingsPage() {
                       {isActive ? "Active theme" : "Use theme"}
                     </Button>
                   </summary>
-                  <div className="mt-4 flex gap-3">
-                    <span className="h-10 w-10 rounded-full border border-border" style={{ backgroundColor: definition.tokens.accent }} />
-                    <span className="h-10 w-10 rounded-full border border-border" style={{ backgroundColor: definition.tokens.surface }} />
-                    <span className="h-10 w-10 rounded-full border border-border" style={{ backgroundColor: definition.tokens.error }} />
-                  </div>
                 </details>
               );
             })}
@@ -1265,7 +1260,116 @@ export function PostPage() {
 }
 
 export function ChatPage() {
-  return <PageFrame title="Chat" subtitle="Coming soon. One-to-one conversations with unread indicators and responsive message panes." />;
+  const { user } = useAuth();
+  const userId = user?.uid ?? "demo-user";
+  const chatCacheKey = `cache:chat:${userId}`;
+  const [chatState, setChatState] = useState<{ conversations: Conversation[]; messages: Message[] }>(() => (
+    readCache<{ conversations: Conversation[]; messages: Message[] }>(chatCacheKey) ?? {
+      conversations,
+      messages,
+    }
+  ));
+  const [activeConversationId, setActiveConversationId] = useState(chatState.conversations[0]?.id ?? "");
+  const [draft, setDraft] = useState("");
+  const activeConversation = chatState.conversations.find((conversation) => conversation.id === activeConversationId) ?? chatState.conversations[0];
+  const activeMessages = activeConversation
+    ? chatState.messages.filter((message) => message.conversationId === activeConversation.id)
+    : [];
+
+  useEffect(() => {
+    const nextCacheKey = `cache:chat:${userId}`;
+    const cachedChat = readCache<{ conversations: Conversation[]; messages: Message[] }>(nextCacheKey);
+    const nextState = cachedChat ?? { conversations, messages };
+    setChatState(nextState);
+    setActiveConversationId(nextState.conversations[0]?.id ?? "");
+  }, [userId]);
+
+  useEffect(() => {
+    writeCache(chatCacheKey, chatState);
+  }, [chatCacheKey, chatState]);
+
+  const sendMessage = () => {
+    if (!activeConversation || !draft.trim()) {
+      return;
+    }
+
+    const body = draft.trim();
+    const createdAt = new Date().toISOString();
+    const nextMessage: Message = {
+      id: `local-${createdAt}`,
+      conversationId: activeConversation.id,
+      senderId: userId,
+      body,
+      createdAt,
+    };
+
+    setChatState((current) => ({
+      conversations: current.conversations.map((conversation) => (
+        conversation.id === activeConversation.id
+          ? { ...conversation, lastMessage: body, updatedAt: createdAt, unreadCount: 0 }
+          : conversation
+      )),
+      messages: [...current.messages, nextMessage],
+    }));
+    setDraft("");
+  };
+
+  return (
+    <PageFrame title="Chat" subtitle="One-to-one conversations with persistent local message history.">
+      <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <Card className="overflow-hidden p-2">
+          {chatState.conversations.map((conversation) => (
+            <button
+              key={conversation.id}
+              type="button"
+              onClick={() => setActiveConversationId(conversation.id)}
+              className={`block w-full rounded-lg px-3 py-3 text-left transition ${
+                conversation.id === activeConversation?.id ? "bg-surfaceAlt text-text" : "text-textMuted hover:bg-surface"
+              }`}
+            >
+              <span className="block font-semibold">{conversation.title}</span>
+              <span className="mt-1 block truncate text-sm">{conversation.lastMessage}</span>
+            </button>
+          ))}
+        </Card>
+
+        <Card className="flex min-h-[520px] flex-col overflow-hidden">
+          <div className="border-b border-border px-5 py-4">
+            <h2 className="font-semibold">{activeConversation?.title ?? "Messages"}</h2>
+          </div>
+          <div className="flex-1 space-y-3 overflow-y-auto p-5">
+            {activeMessages.map((message) => {
+              const isOwn = message.senderId === userId;
+              return (
+                <div key={message.id} className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[78%] rounded-lg px-4 py-2 text-sm ${isOwn ? "bg-accent text-white" : "bg-surfaceAlt text-text"}`}>
+                    {message.body}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex gap-2 border-t border-border p-4">
+            <input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  sendMessage();
+                }
+              }}
+              placeholder="Message"
+              className="min-w-0 flex-1 rounded-full border border-border bg-transparent px-4 py-2 text-sm outline-none focus:border-accent"
+            />
+            <Button type="button" onClick={sendMessage} disabled={!draft.trim()} className="gap-2">
+              <Send size={16} />
+              Send
+            </Button>
+          </div>
+        </Card>
+      </div>
+    </PageFrame>
+  );
 }
 
 export function NotificationsPage() {

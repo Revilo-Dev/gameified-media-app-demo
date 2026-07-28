@@ -40,7 +40,16 @@ export function writeCache<T>(key: string, value: T) {
   }
 
   const serialized = JSON.stringify(value);
-  window.localStorage.setItem(key, serialized);
+  try {
+    window.localStorage.setItem(key, serialized);
+  } catch (error) {
+    console.warn("[cache] localStorage write skipped", { key, error });
+  }
+
+  if (serialized.length > 3500) {
+    return;
+  }
+
   document.cookie = `${encodeURIComponent(key)}=${encodeURIComponent(serialized)}; max-age=${COOKIE_TTL_SECONDS}; path=/; SameSite=Lax`;
 }
 

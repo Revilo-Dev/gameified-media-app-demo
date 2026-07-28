@@ -47,6 +47,7 @@ export async function ensureUserProfile(user: User) {
     theme: "graphite" as ThemeMode,
     accentColor: "#ff6b57",
     gems: 0,
+    casinoCoins: 0,
     followerCount: 0,
     followingCount: 0,
     postCount: 0,
@@ -114,6 +115,51 @@ export async function addGemsToUser(userId: string, gemDelta: number) {
 
     transaction.update(ref, {
       gems: nextGems,
+      updatedAt: serverTimestamp(),
+    });
+  });
+}
+
+export async function buyCasinoCoin(userId: string) {
+  const ref = doc(db, COLLECTIONS.users, userId);
+
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+
+    if (!snapshot.exists()) {
+      return;
+    }
+
+    const currentGems = Number(snapshot.data().gems ?? 0);
+    if (currentGems < 5) {
+      throw new Error("You need 5 gems to buy a casino coin.");
+    }
+
+    transaction.update(ref, {
+      gems: currentGems - 5,
+      casinoCoins: Number(snapshot.data().casinoCoins ?? 0) + 1,
+      updatedAt: serverTimestamp(),
+    });
+  });
+}
+
+export async function spendCasinoCoin(userId: string) {
+  const ref = doc(db, COLLECTIONS.users, userId);
+
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+
+    if (!snapshot.exists()) {
+      return;
+    }
+
+    const currentCasinoCoins = Number(snapshot.data().casinoCoins ?? 0);
+    if (currentCasinoCoins < 1) {
+      throw new Error("You need 1 casino coin to spin.");
+    }
+
+    transaction.update(ref, {
+      casinoCoins: currentCasinoCoins - 1,
       updatedAt: serverTimestamp(),
     });
   });

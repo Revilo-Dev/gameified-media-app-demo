@@ -1,4 +1,11 @@
-export type ThemeMode = "graphite" | "mist" | "oled" | "aurora";
+export type ThemeMode =
+  | "graphite"
+  | "mist"
+  | "oled"
+  | "aurora"
+  | "nordic"
+  | "synthwave"
+  | "solarizedLight";
 
 export type BadgeRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
 
@@ -38,6 +45,7 @@ export interface UserProfile {
   theme: ThemeMode;
   accentColor: string;
   gems: number;
+  casinoCoins: number;
   followerCount: number;
   followingCount: number;
   postCount: number;

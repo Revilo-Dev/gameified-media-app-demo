@@ -12,7 +12,6 @@ import {
   query,
   runTransaction,
   serverTimestamp,
-  setDoc,
   updateDoc,
   where,
   writeBatch,
@@ -21,12 +20,13 @@ import {
 import { db } from "@/firebase/config";
 import { COLLECTIONS } from "@/firebase/firestore";
 import { createNotification } from "@/firebase/notifications";
-import { subscribeToXpLeaderboard } from "@/firebase/users";
+import { addXpToUser, subscribeToXpLeaderboard } from "@/firebase/users";
 import { deleteStorageObject } from "@/firebase/storage";
 import { readCache, writeCache } from "@/lib/persistent-cache";
 import type { Post, UserProfile } from "@/types/models";
 
 const POSTS_CACHE_KEY = "cache:posts";
+const POSTS_CACHE_LIMIT = 25;
 
 function normalizeCreatedAt(value: unknown) {
   if (typeof value === "string") {
@@ -91,7 +91,7 @@ export function subscribeToPosts(onChange: (posts: Post[]) => void): Unsubscribe
 
   return onSnapshot(postsQuery, (snapshot) => {
     const nextPosts = snapshot.docs.map(normalizePost);
-    writeCache(POSTS_CACHE_KEY, nextPosts);
+    writeCache(POSTS_CACHE_KEY, nextPosts.slice(0, POSTS_CACHE_LIMIT));
     onChange(nextPosts);
   });
 }
@@ -143,6 +143,13 @@ function reactionDocId(postId: string, userId: string) {
   return `${postId}_${userId}`;
 }
 
+function getStarRatingXpReward(stars: number) {
+  if (stars === 5) return 500;
+  if (stars === 4) return 300;
+  if (stars === 3) return 100;
+  return 0;
+}
+
 export async function ratePost(postId: string, user: UserProfile, stars: number) {
   const reactionRef = doc(db, COLLECTIONS.reactions, reactionDocId(postId, user.uid));
   const postRef = doc(db, COLLECTIONS.posts, postId);
@@ -181,10 +188,15 @@ export async function ratePost(postId: string, user: UserProfile, stars: number)
   });
 
   if (authorId && authorId !== user.uid) {
+    const xpReward = getStarRatingXpReward(stars);
+    if (xpReward > 0) {
+      await addXpToUser(authorId, xpReward);
+    }
+
     await createNotification({
       type: "reaction",
       title: "New star rating",
-      body: `${user.displayName} rated your post ${stars}/5 stars.`,
+      body: `${user.displayName} rated your post ${stars}/5 stars.${xpReward > 0 ? ` You earned ${xpReward} XP.` : ""}`,
       actorId: user.uid,
       userId: authorId,
       postId,

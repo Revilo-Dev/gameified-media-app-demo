@@ -7,6 +7,7 @@ import {
   Gamepad2,
   Home,
   LayoutGrid,
+  Menu,
   MessageSquare,
   PlusSquare,
   Search,
@@ -44,6 +45,22 @@ const navItems = [
   { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
 ];
 
+const mobilePrimaryNavItems = [
+  { to: "/", label: "Home", icon: Home },
+  { to: "/explore", label: "Explore", icon: Search },
+  { to: "/chat", label: "Chat", icon: MessageSquare },
+  { to: "/leaderboard", label: "Leaders", icon: Trophy },
+];
+
+const mobileSecondaryNavItems = [
+  { to: "/arcade", label: "Arcade", icon: Gamepad2 },
+  { to: "/market", label: "Market", icon: LayoutGrid },
+  { to: "/notifications", label: "Notifications", icon: Bell },
+  { to: null, label: "Profile", icon: Bookmark },
+  { to: "/premium", label: "Premium", icon: Crown },
+  { to: "/settings", label: "Settings", icon: Settings },
+];
+
 export function AppLayout() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -53,6 +70,7 @@ export function AppLayout() {
   const [followCounts, setFollowCounts] = useState({ followers: users[0].followerCount, following: users[0].followingCount });
   const [notificationCount, setNotificationCount] = useState(0);
   const [claimedToday, setClaimedToday] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [displayedGems, setDisplayedGems] = useState(users[0].gems);
   const [gemDelta, setGemDelta] = useState(0);
   const [gemFlash, setGemFlash] = useState<"gain" | "spend" | null>(null);
@@ -158,6 +176,7 @@ export function AppLayout() {
 
   useEffect(() => {
     setComposerOpen(false);
+    setMobileMenuOpen(false);
   }, [location.pathname, setComposerOpen]);
 
   useEffect(() => {
@@ -333,8 +352,8 @@ export function AppLayout() {
         </button>
 
         <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-canvas/95 px-3 py-2 backdrop-blur lg:hidden">
-          <div className="mx-auto grid max-w-md grid-cols-6 gap-2">
-            {navItems.map((item) => (
+          <div className="mx-auto grid max-w-md grid-cols-5 gap-2">
+            {mobilePrimaryNavItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -344,9 +363,58 @@ export function AppLayout() {
                 {item.label}
               </NavLink>
             ))}
+            <button
+              type="button"
+              className={`flex flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-medium transition ${mobileMenuOpen ? "bg-[color:var(--accent)] text-white shadow-lg" : "text-textMuted"}`}
+              onClick={() => setMobileMenuOpen((current) => !current)}
+            >
+              <Menu size={18} />
+              Menu
+            </button>
           </div>
         </nav>
       </div>
+
+      {mobileMenuOpen ? (
+        <div className="fixed inset-0 z-50 bg-black/45 px-3 pb-24 pt-20 backdrop-blur-sm lg:hidden">
+          <div className="mx-auto max-w-md rounded-[2rem] border border-border bg-canvas p-4 shadow-panel">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold">More</p>
+                <p className="text-sm text-textMuted">Shortcuts to the rest of the app.</p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setMobileMenuOpen(false)}>
+                <X size={16} />
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {mobileSecondaryNavItems.map((item) => {
+                const destination = item.to ?? profilePath;
+                return (
+                  <NavLink
+                    key={`${item.label}-${destination}`}
+                    to={destination}
+                    className={({ isActive }) => `relative flex min-h-24 flex-col justify-between rounded-3xl border px-4 py-4 text-left transition ${
+                      isActive ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10 text-text" : "border-border bg-surface text-text"
+                    }`}
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <item.icon size={18} />
+                      {item.label === "Notifications" && notificationCount ? (
+                        <span className="rounded-full bg-[color:var(--error)] px-2 py-0.5 text-[10px] font-semibold text-white">
+                          {notificationCount}
+                        </span>
+                      ) : null}
+                    </div>
+                    <span className="text-sm font-semibold">{item.label}</span>
+                  </NavLink>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {isComposerOpen ? (
         <div className="fixed inset-0 z-50 bg-black/50 p-3 backdrop-blur-sm sm:p-6">

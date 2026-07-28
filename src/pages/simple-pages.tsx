@@ -103,6 +103,7 @@ const changelogEntries = [
       "Star-rating XP is now awarded only on a user's first rating for a post, so changing a rating no longer grants repeat XP.",
       "Comment threads can now be collapsed and expanded inline, making long nested conversations much easier to scan.",
       "Auto-generated handles are now forced to be unique at account creation, and profile handle edits still check availability before save.",
+      "Mobile navigation was redesigned with a cleaner four-tab bottom bar and a new menu panel for arcade, market, notifications, profile, premium, and settings.",
     ],
   },
   {

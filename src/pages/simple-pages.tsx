@@ -149,13 +149,12 @@ export function ExplorePage() {
     <PageFrame title="Explore" subtitle="Search, trends, suggested users, and popular posts are composed into one discovery surface for the demo." titleIcon={Search}>
       <Card className="p-6">
         <div className="grid gap-4 md:grid-cols-2">
-          <div>
-            <p className="font-semibold">Trending topics</p>
-            <p className="mt-2 text-sm text-textMuted">#community-design, #dark-mode, #daily-trivia</p>
-          </div>
-          <div>
-            <p className="font-semibold">Suggested users</p>
-            <p className="mt-2 text-sm text-textMuted">{users.map((user) => `@${user.handle}`).join(", ")}</p>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Search size={16} />
+              <p className="font-semibold">Search</p>
+            </div>
+            <p className="text-sm text-textMuted">Search is not functional in the demo, but this surface would normally show search results for posts and users.</p>
           </div>
         </div>
       </Card>
@@ -457,11 +456,6 @@ export function SettingsPage() {
                       {isActive ? "Active theme" : "Use theme"}
                     </Button>
                   </summary>
-                  <div className="mt-4 flex gap-3">
-                    <span className="h-10 w-10 rounded-full border border-border" style={{ backgroundColor: definition.tokens.accent }} />
-                    <span className="h-10 w-10 rounded-full border border-border" style={{ backgroundColor: definition.tokens.surface }} />
-                    <span className="h-10 w-10 rounded-full border border-border" style={{ backgroundColor: definition.tokens.error }} />
-                  </div>
                 </details>
               );
             })}

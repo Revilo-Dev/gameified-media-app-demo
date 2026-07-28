@@ -1,4 +1,11 @@
-export type ThemeMode = "graphite" | "mist" | "oled" | "aurora";
+export type ThemeMode =
+  | "graphite"
+  | "mist"
+  | "oled"
+  | "aurora"
+  | "nordic"
+  | "synthwave"
+  | "solarizedLight";
 
 export type BadgeRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
 

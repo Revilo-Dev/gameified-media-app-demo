@@ -21,6 +21,7 @@ service cloud.firestore {
           "xp",
           "level",
           "gems",
+          "emeralds",
           "casinoCoins",
           "followerCount",
           "followingCount",

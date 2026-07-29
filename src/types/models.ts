@@ -45,6 +45,7 @@ export interface UserProfile {
   theme: ThemeMode;
   accentColor: string;
   gems: number;
+  emeralds: number;
   casinoCoins: number;
   followerCount: number;
   followingCount: number;

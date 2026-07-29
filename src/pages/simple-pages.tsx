@@ -16,7 +16,7 @@ import { conversations, messages, shopItems, users } from "@/lib/demo-data";
 import { bannerPresets } from "@/lib/banner-presets";
 import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/auth";
 import { useAuth } from "@/app/auth-provider";
-import { addGemsToUser, addXpToUser, ensureUserProfile, getDemoUserByHandle, isHandleAvailable, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
+import { addGemsToUser, addXpToUser, ensureUserProfile, getDemoUserByHandle, investGemsInEmeralds, isHandleAvailable, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
 import { changeUserPassword, linkGoogleAccount, updateDisplayName, uploadProfileBanner, uploadProfilePicture } from "@/firebase/auth";
 import { deletePostCascade, subscribeToPosts, subscribeToPostsByAuthor } from "@/firebase/posts";
 import { InlineEntities } from "@/components/common/inline-entities";
@@ -1740,6 +1740,83 @@ export function ArcadePage() {
 
 export function MarketPage() {
   return <PageFrame title="Market" subtitle="Coming soon. Spend your gems on cosmetics, themes, badges, and more" />;
+}
+
+const emeraldPacks = [
+  { id: "starter", name: "Starter stake", gems: 10, tone: "from-emerald-500/20 to-cyan-500/10" },
+  { id: "builder", name: "Builder stake", gems: 25, tone: "from-teal-500/20 to-lime-500/10" },
+  { id: "whale", name: "Vault stake", gems: 50, tone: "from-green-500/20 to-sky-500/10" },
+];
+
+export function CryptoPage() {
+  const { user } = useAuth();
+  const [profile, setProfile] = useState<UserProfile | null>(users[0]);
+  const [pendingPackId, setPendingPackId] = useState<string | null>(null);
+  const gems = profile?.gems ?? 0;
+  const emeralds = profile?.emeralds ?? 0;
+
+  useEffect(() => {
+    if (!user) {
+      setProfile(users[0]);
+      return;
+    }
+
+    return subscribeToUserProfileById(user.uid, setProfile);
+  }, [user]);
+
+  const invest = async (pack: (typeof emeraldPacks)[number]) => {
+    if (!user || pendingPackId) {
+      return;
+    }
+
+    setPendingPackId(pack.id);
+    try {
+      await investGemsInEmeralds(user.uid, pack.gems);
+      toast.success("Emerald investment confirmed", { description: `-${pack.gems} gems, +${pack.gems} emeralds` });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not invest in emeralds.");
+    } finally {
+      setPendingPackId(null);
+    }
+  };
+
+  return (
+    <PageFrame title="Crypto" subtitle="Invest gems into emeralds and build your on-platform treasury." titleIcon={Gem}>
+      <div className="space-y-5">
+        <Card className="grid gap-3 p-5 sm:grid-cols-2">
+          <div className="rounded-lg border border-border bg-surfaceAlt px-4 py-3">
+            <p className="flex items-center gap-2 text-sm text-textMuted"><Gem size={16} /> Available gems</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums">{gems}</p>
+          </div>
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+            <p className="flex items-center gap-2 text-sm text-emerald-300"><Sparkles size={16} /> Emerald holdings</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums">{emeralds}</p>
+          </div>
+        </Card>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          {emeraldPacks.map((pack) => (
+            <Card key={pack.id} className={`space-y-4 bg-gradient-to-br ${pack.tone} p-5`}>
+              <div>
+                <p className="text-sm font-semibold text-emerald-300">{pack.name}</p>
+                <p className="mt-2 text-3xl font-bold tabular-nums">{pack.gems}</p>
+                <p className="text-sm text-textMuted">gems into {pack.gems} emeralds</p>
+              </div>
+              <Button
+                className="w-full gap-2"
+                variant={gems >= pack.gems ? "primary" : "secondary"}
+                disabled={!user || pendingPackId !== null || gems < pack.gems}
+                onClick={() => void invest(pack)}
+              >
+                <Gem size={16} />
+                {pendingPackId === pack.id ? "Investing..." : gems < pack.gems ? "Need more gems" : "Invest"}
+              </Button>
+            </Card>
+          ))}
+        </div>
+      </div>
+    </PageFrame>
+  );
 }
 
 export function ShopPage() {

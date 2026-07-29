@@ -63,6 +63,7 @@ export async function ensureUserProfile(user: User) {
     theme: "graphite" as ThemeMode,
     accentColor: "#ff6b57",
     gems: 0,
+    emeralds: 0,
     casinoCoins: 0,
     followerCount: 0,
     followingCount: 0,
@@ -165,6 +166,29 @@ export async function buyCasinoCoin(userId: string) {
     transaction.update(ref, {
       gems: currentGems - 5,
       casinoCoins: Number(snapshot.data().casinoCoins ?? 0) + 1,
+      updatedAt: serverTimestamp(),
+    });
+  });
+}
+
+export async function investGemsInEmeralds(userId: string, gemCost: number) {
+  const ref = doc(db, COLLECTIONS.users, userId);
+
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+
+    if (!snapshot.exists()) {
+      return;
+    }
+
+    const currentGems = Number(snapshot.data().gems ?? 0);
+    if (currentGems < gemCost) {
+      throw new Error(`You need ${gemCost} gems to invest in emeralds.`);
+    }
+
+    transaction.update(ref, {
+      gems: currentGems - gemCost,
+      emeralds: Number(snapshot.data().emeralds ?? 0) + gemCost,
       updatedAt: serverTimestamp(),
     });
   });

@@ -17,6 +17,7 @@ import { deletePostCascade as deletePostCascadeCallable } from "@/firebase/funct
 import { createNotification } from "@/firebase/notifications";
 import { ratePost, removePostEmbed, softDeletePost, subscribeToPostReactions, throwRottenTomato } from "@/firebase/posts";
 import { getDemoUserById, getModeratorIds, subscribeToUserProfileById } from "@/firebase/users";
+import { getNameColorValue } from "@/constants/name-colors";
 import type { Post, UserProfile } from "@/types/models";
 
 function TomatoIcon({ className = "h-4 w-4" }: { className?: string }) {
@@ -190,7 +191,9 @@ export function PostCard({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" className="text-left text-sm font-semibold hover:underline" onClick={() => navigate(profilePath)}>
-                  {author?.displayName ?? "Unknown profile"}
+                  <span style={{ color: getNameColorValue(author?.equippedNameColorId) }}>
+                    {author?.displayName ?? "Unknown profile"}
+                  </span>
                 </button>
                 {author ? <span className="rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--accent)]">Lv {author.level}</span> : null}
                 {author ? <UserBadges user={author} /> : null}

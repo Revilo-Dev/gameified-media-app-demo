@@ -1,34 +1,79 @@
 import { useEffect, useState } from "react";
-import { Coins, Gem, Sparkles, Share2 } from "lucide-react";
-import { toast } from "sonner";
+import { Cherry, Citrus, Diamond, Sparkles } from "lucide-react";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { useAuth } from "@/app/auth-provider";
-import { createPost } from "@/firebase/posts";
-import { addXpToUser, addGemsToUser, buyCasinoCoin, spendCasinoCoin, subscribeToUserProfileById } from "@/firebase/users";
+import { addGemsToUser, subscribeToUserProfileById } from "@/firebase/users";
 import type { UserProfile } from "@/types/models";
 
-const SYMBOLS = ["🍒", "🍋", "🍊", "🍌", "🎰", "💎"];
-const WINNING_COMBOS = {
-  jackpot: { symbols: ["💎", "💎", "💎"], gems: 100, xp: 50 },
-  triple: { symbols: ["🍒", "🍒", "🍒"], gems: 50, xp: 25 },
-  sevens: { symbols: ["🎰", "🎰", "🎰"], gems: 75, xp: 30 },
-  fruit: { symbols: ["🍋", "🍋", "🍋"], gems: 30, xp: 15 },
-};
+const SYMBOLS = [
+  { id: "cherry", glyph: "🍒", weight: 28 },
+  { id: "lemon", glyph: "🍋", weight: 20 },
+  { id: "orange", glyph: "🍊", weight: 18 },
+  { id: "banana", glyph: "🍌", weight: 16 },
+  { id: "slot", glyph: "🎰", weight: 10 },
+  { id: "diamond", glyph: "💎", weight: 8 },
+] as const;
+
+type SymbolId = (typeof SYMBOLS)[number]["id"];
+
+function getWeightedSymbol() {
+  const totalWeight = SYMBOLS.reduce((sum, symbol) => sum + symbol.weight, 0);
+  let threshold = Math.random() * totalWeight;
+
+  for (const symbol of SYMBOLS) {
+    threshold -= symbol.weight;
+    if (threshold <= 0) {
+      return symbol;
+    }
+  }
+
+  return SYMBOLS[0];
+}
+
+function countSymbols(reels: SymbolId[]) {
+  return reels.reduce<Record<string, number>>((counts, symbolId) => {
+    counts[symbolId] = (counts[symbolId] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+function evaluateSpin(reels: SymbolId[]) {
+  const counts = countSymbols(reels);
+  const fruitIds: SymbolId[] = ["lemon", "orange", "banana"];
+  const tripleFruit = fruitIds.some((symbolId) => counts[symbolId] === 3);
+  const doubleFruit = fruitIds.some((symbolId) => counts[symbolId] === 2);
+
+  if (counts.diamond === 3) return { label: "Triple diamonds", multiplier: 10 };
+  if (counts.slot === 3) return { label: "Triple slots", multiplier: 8 };
+  if ((counts.slot ?? 0) === 2) return { label: "Double slots", multiplier: 6 };
+  if (counts.cherry === 3) return { label: "Triple cherries", multiplier: 5 };
+  if (tripleFruit) return { label: "Triple fruit", multiplier: 3 };
+  if ((counts.cherry ?? 0) === 2) return { label: "Double cherries", multiplier: 2 };
+  if (doubleFruit) return { label: "Double fruit", multiplier: 1.5 };
+
+  return null;
+}
+
+const PAYOUT_ROWS = [
+  { icon: Citrus, label: "2 fruit", value: "1.5x" },
+  { icon: Cherry, label: "2 cherries", value: "2x" },
+  { icon: Citrus, label: "3 fruit", value: "3x" },
+  { icon: Cherry, label: "3 cherries", value: "5x" },
+  { icon: Sparkles, label: "2 slots", value: "6x" },
+  { icon: Sparkles, label: "3 slots", value: "8x" },
+  { icon: Diamond, label: "3 diamonds", value: "10x" },
+] as const;
 
 export function SlotMachine() {
   const { user } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [reels, setReels] = useState(["🍒", "🍋", "🍊"]);
   const [isSpinning, setIsSpinning] = useState(false);
-  const [lastWin, setLastWin] = useState<{
-    symbols: string[];
-    gems: number;
-    xp: number;
-    name: string;
-  } | null>(null);
-  const casinoCoins = profile?.casinoCoins ?? 0;
+  const [wagerInput, setWagerInput] = useState("10");
+  const [lastResult, setLastResult] = useState<{ payout: number; multiplier: number; label: string } | null>(null);
   const gems = profile?.gems ?? 0;
+  const wager = Math.max(1, Math.floor(Number(wagerInput) || 10));
 
   useEffect(() => {
     if (!user) {
@@ -39,191 +84,98 @@ export function SlotMachine() {
     return subscribeToUserProfileById(user.uid, setProfile);
   }, [user]);
 
-  const checkWin = (newReels: string[]): { name: string; gems: number; xp: number } | null => {
-    for (const [key, combo] of Object.entries(WINNING_COMBOS)) {
-      if (JSON.stringify([...newReels].sort()) === JSON.stringify([...combo.symbols].sort())) {
-        return { name: key, gems: combo.gems, xp: combo.xp };
-      }
+  async function spin() {
+    if (!user || isSpinning) {
+      return;
     }
-    return null;
-  };
-
-  const buyCoin = async () => {
-    if (!user || gems < 5) return;
-
-    try {
-      await buyCasinoCoin(user.uid);
-      toast.success("Casino coin bought", { description: "-5 gems, +1 casino coin" });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not buy a casino coin.");
-    }
-  };
-
-  const spin = async () => {
-    if (!user || isSpinning || casinoCoins === 0) return;
-
-    setIsSpinning(true);
-    setLastWin(null);
-
-    try {
-      await spendCasinoCoin(user.uid);
-      toast.info("Casino coin spent", { description: "Good luck on the reels." });
-    } catch (error) {
-      setIsSpinning(false);
-      toast.error(error instanceof Error ? error.message : "You need 1 casino coin to spin.");
+    if (gems < wager) {
       return;
     }
 
-    // Spinning animation
-    for (let i = 0; i < 20; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      setReels([
-        SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
-        SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
-        SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
-      ]);
+    setIsSpinning(true);
+    setLastResult(null);
+    await addGemsToUser(user.uid, -wager);
+
+    for (let index = 0; index < 16; index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 55));
+      setReels([getWeightedSymbol().glyph, getWeightedSymbol().glyph, getWeightedSymbol().glyph]);
     }
 
-    const newReels = [
-      SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
-      SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
-      SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
-    ];
+    const finalSymbols = [getWeightedSymbol(), getWeightedSymbol(), getWeightedSymbol()];
+    const finalIds = finalSymbols.map((symbol) => symbol.id);
+    setReels(finalSymbols.map((symbol) => symbol.glyph));
 
-    setReels(newReels);
-
-    const win = checkWin(newReels);
-    if (win && user) {
-      setLastWin({ symbols: newReels, ...win });
-      await addGemsToUser(user.uid, win.gems);
-      await addXpToUser(user.uid, win.xp);
-      toast.success(`🎉 You won ${win.gems} gems!`);
-    } else {
-      toast.info("Better luck next time!");
+    const win = evaluateSpin(finalIds);
+    if (win) {
+      const payout = Math.floor(wager * win.multiplier);
+      await addGemsToUser(user.uid, payout);
+      setLastResult({ payout, multiplier: win.multiplier, label: win.label });
     }
 
     setIsSpinning(false);
-  };
-
-  const shareWin = async () => {
-    if (!lastWin || !user) return;
-
-    try {
-      const emojiText = lastWin.symbols.join("");
-      await createPost({
-        authorId: user.uid,
-        content: `🎰 Just hit the jackpot on the slot machine! ${emojiText}\n\n+${lastWin.gems} gems and +${lastWin.xp} XP! 💰 #SlotMachine #Arcade`,
-        tags: ["SlotMachine", "Arcade"],
-        visibility: "public",
-        imageURL: null,
-        imageStoragePath: null,
-        gifURL: null,
-        parentPostId: null,
-        repostedPostId: null,
-        quotedPostId: null,
-        replyToPostId: null,
-        poll: null,
-        });
-      toast.success("Posted your win!");
-    } catch (error) {
-      toast.error("Failed to post win");
-      console.error(error);
-    }
-  };
+  }
 
   return (
-    <Card className="space-y-6 p-6">
-      <div>
-        <h3 className="flex items-center gap-2 text-lg font-semibold">
-          <Sparkles className="h-5 w-5 text-yellow-500" />
-          Slot Machine
-        </h3>
-        <p className="mt-1 text-sm text-textMuted">Spend 1 casino coin to spin. Casino coins cost 5 gems each.</p>
+    <Card className="space-y-5 p-6">
+      <div className="flex items-center gap-2">
+        <Sparkles className="h-5 w-5 text-[color:var(--accent)]" />
+        <h3 className="text-lg font-semibold">Slot Machine</h3>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="rounded-lg border border-border bg-surface px-4 py-3">
-          <p className="flex items-center gap-2 text-sm text-textMuted"><Gem className="h-4 w-4" /> Gems</p>
-          <p className="mt-1 text-xl font-bold">{gems}</p>
-        </div>
-        <div className="rounded-lg border border-border bg-surface px-4 py-3">
-          <p className="flex items-center gap-2 text-sm text-textMuted"><Coins className="h-4 w-4" /> Casino coins</p>
-          <p className="mt-1 text-xl font-bold">{casinoCoins}</p>
-        </div>
-      </div>
-
-      <div className="flex justify-center gap-4">
-        {reels.map((reel, index) => (
-          <div
-            key={index}
-            className={`h-24 w-20 rounded-lg border-4 border-yellow-500 bg-gradient-to-b from-yellow-50 to-yellow-100 flex items-center justify-center text-5xl transition-all ${
-              isSpinning ? "animate-pulse" : ""
-            }`}
-            style={{
-              animation: isSpinning ? `spin 0.1s infinite` : "none",
-            }}
-          >
-            {reel}
-          </div>
-        ))}
-      </div>
-
-      <style>{`
-        @keyframes spin {
-          0% { transform: rotateY(0); }
-          100% { transform: rotateY(360deg); }
-        }
-      `}</style>
-
-      <div className="space-y-3">
-        <Button
-          onClick={buyCoin}
-          disabled={isSpinning || gems < 5}
-          variant="secondary"
-          className="w-full gap-2"
-        >
-          <Coins className="h-4 w-4" />
-          {gems < 5 ? "Need 5 gems for a casino coin" : "Buy casino coin for 5 gems"}
-        </Button>
-        <Button
-          onClick={spin}
-          disabled={isSpinning || casinoCoins === 0}
-          className="w-full"
-          size="lg"
-        >
-          {isSpinning ? "Spinning..." : casinoCoins === 0 ? "Need 1 casino coin" : "SPIN"}
-        </Button>
-
-        {lastWin && (
-          <div className="rounded-lg bg-green-50 p-4">
-            <p className="font-semibold text-green-900">🎉 You Won!</p>
-            <p className="mt-1 text-sm text-green-700">
-              {lastWin.symbols.join("")} - {lastWin.name.toUpperCase()}
-            </p>
-            <p className="text-sm text-green-700">
-              +{lastWin.gems} gems, +{lastWin.xp} XP
-            </p>
-            <Button
-              onClick={shareWin}
-              variant="secondary"
-              size="sm"
-              className="mt-3 w-full gap-2"
+      <div className="space-y-4 rounded-[1.75rem] border border-border bg-surfaceAlt/40 p-4">
+        <div className="flex justify-center gap-3">
+          {reels.map((reel, index) => (
+            <div
+              key={`${reel}-${index}`}
+              className={`flex h-24 w-20 items-center justify-center rounded-[1.5rem] border border-border bg-surface text-5xl transition-transform ${
+                isSpinning ? "animate-pulse" : ""
+              }`}
             >
-              <Share2 className="h-4 w-4" />
-              Share Your Win
-            </Button>
+              {reel}
+            </div>
+          ))}
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+          <div className="space-y-2">
+            <label className="block text-sm font-semibold" htmlFor="slot-wager">Wager</label>
+            <input
+              id="slot-wager"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={wagerInput}
+              onChange={(event) => setWagerInput(event.target.value.replace(/[^\d]/g, ""))}
+              className="w-full rounded-2xl border border-border bg-surface px-4 py-3 text-sm outline-none"
+              placeholder="10"
+            />
           </div>
-        )}
+          <Button onClick={() => void spin()} disabled={isSpinning || gems < wager} className="sm:min-w-40">
+            {isSpinning ? "Spinning..." : gems < wager ? `Need ${wager} gems` : `Spin for ${wager}`}
+          </Button>
+        </div>
+
+        {lastResult ? (
+          <div className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm">
+            <p className="font-semibold">{lastResult.label}</p>
+            <p className="mt-1 text-textMuted">{lastResult.multiplier}x payout, +{lastResult.payout} gems</p>
+          </div>
+        ) : null}
       </div>
 
-      <div className="rounded-lg bg-blue-50 p-4 text-sm text-blue-900">
-        <p className="font-semibold">Prize Breakdown:</p>
-        <ul className="mt-2 space-y-1 text-xs">
-          <li>💎💎💎 Jackpot: 100 gems, 50 XP</li>
-          <li>🍒🍒🍒 Triple: 50 gems, 25 XP</li>
-          <li>🎰🎰🎰 Lucky: 75 gems, 30 XP</li>
-          <li>🍋🍋🍋 Fruit: 30 gems, 15 XP</li>
-        </ul>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {PAYOUT_ROWS.map((row) => {
+          const Icon = row.icon;
+          return (
+            <div key={row.label} className="flex items-center justify-between rounded-2xl border border-border bg-surface px-4 py-3 text-sm">
+              <span className="flex items-center gap-2">
+                <Icon className="h-4 w-4 text-[color:var(--accent)]" />
+                {row.label}
+              </span>
+              <span className="font-semibold">{row.value}</span>
+            </div>
+          );
+        })}
       </div>
     </Card>
   );

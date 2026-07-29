@@ -1,14 +1,22 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { subscribeToUserProfileByHandle } from "@/firebase/users";
 import type { UserProfile } from "@/types/models";
 
 const ENTITY_PATTERN = /(@[a-zA-Z0-9_]+|#[a-zA-Z0-9_]+)/g;
 
-function MentionEntity({ value }: { value: string }) {
+function MentionEntity({
+  value,
+  onClick,
+}: {
+  value: string;
+  onClick?: (value: string) => void;
+}) {
   const handle = value.slice(1).toLowerCase();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!open) {
@@ -25,6 +33,14 @@ function MentionEntity({ value }: { value: string }) {
         className="font-semibold text-[color:var(--accent)]"
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
+        onClick={() => {
+          if (onClick) {
+            onClick(value);
+            return;
+          }
+
+          navigate(`/profile/${handle}`);
+        }}
       >
         {value}
       </button>
@@ -42,9 +58,13 @@ function MentionEntity({ value }: { value: string }) {
 export function InlineEntities({
   text,
   className,
+  onMentionClick,
+  onHashtagClick,
 }: {
   text: string;
   className?: string;
+  onMentionClick?: (value: string) => void;
+  onHashtagClick?: (value: string) => void;
 }) {
   const parts = text.split(ENTITY_PATTERN);
 
@@ -63,7 +83,20 @@ export function InlineEntities({
         }
 
         if (part.startsWith("@")) {
-          return <MentionEntity key={`${part}-${index}`} value={part} />;
+          return <MentionEntity key={`${part}-${index}`} value={part} onClick={onMentionClick} />;
+        }
+
+        if (onHashtagClick) {
+          return (
+            <button
+              key={`${part}-${index}`}
+              type="button"
+              className="font-semibold text-[color:var(--accent)]"
+              onClick={() => onHashtagClick(part)}
+            >
+              {part}
+            </button>
+          );
         }
 
         return <span key={`${part}-${index}`} className="font-semibold text-[color:var(--accent)]">{part}</span>;

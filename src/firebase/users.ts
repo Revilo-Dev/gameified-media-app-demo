@@ -64,6 +64,9 @@ export async function ensureUserProfile(user: User) {
     accentColor: "#ff6b57",
     gems: 0,
     casinoCoins: 0,
+    ownedNameColorIds: ["default"],
+    ownedThemeIds: ["graphite", "mist"],
+    equippedNameColorId: "default",
     followerCount: 0,
     followingCount: 0,
     postCount: 0,
@@ -193,14 +196,17 @@ export async function spendCasinoCoin(userId: string) {
 }
 
 export function subscribeToXpLeaderboard(onChange: (users: UserProfile[]) => void): Unsubscribe {
-  const leaderboardQuery = query(collection(db, COLLECTIONS.users), orderBy("xp", "desc"), orderBy("level", "desc"), limit(20));
+  const leaderboardQuery = query(collection(db, COLLECTIONS.users), orderBy("level", "desc"), limit(50));
 
   return onSnapshot(leaderboardQuery, (snapshot) => {
     onChange(
-      snapshot.docs.map((document) => ({
-        ...(document.data() as UserProfile),
-        uid: document.id,
-      })),
+      snapshot.docs
+        .map((document) => ({
+          ...(document.data() as UserProfile),
+          uid: document.id,
+        }))
+        .sort((left, right) => right.level - left.level)
+        .slice(0, 20),
     );
   });
 }
@@ -247,6 +253,19 @@ export function subscribeToUserProfileByHandle(handle: string, onChange: (profil
 
     const document = snapshot.docs[0];
     onChange({ ...(document.data() as UserProfile), uid: document.id });
+  });
+}
+
+export function subscribeToUserProfiles(onChange: (users: UserProfile[]) => void): Unsubscribe {
+  const profilesQuery = query(collection(db, COLLECTIONS.users), orderBy("joinedAt", "desc"), limit(100));
+
+  return onSnapshot(profilesQuery, (snapshot) => {
+    onChange(
+      snapshot.docs.map((document) => ({
+        ...(document.data() as UserProfile),
+        uid: document.id,
+      })),
+    );
   });
 }
 

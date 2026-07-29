@@ -12,11 +12,13 @@ import { Card } from "@/components/common/card";
 import { Button } from "@/components/common/button";
 import { XpProgress } from "@/components/gamification/xp-progress";
 import { SlotMachine } from "@/components/gamification/slot-machine";
+import { CoinToss } from "@/components/gamification/coin-toss";
+import { DiceGame } from "@/components/gamification/dice-game";
 import { conversations, messages, shopItems, users } from "@/lib/demo-data";
 import { bannerPresets } from "@/lib/banner-presets";
 import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/auth";
 import { useAuth } from "@/app/auth-provider";
-import { addGemsToUser, addXpToUser, ensureUserProfile, getDemoUserByHandle, isHandleAvailable, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
+import { addGemsToUser, addXpToUser, ensureUserProfile, getDemoUserByHandle, isHandleAvailable, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToUserProfiles, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
 import { changeUserPassword, linkGoogleAccount, updateDisplayName, uploadProfileBanner, uploadProfilePicture } from "@/firebase/auth";
 import { deletePostCascade, subscribeToPosts, subscribeToPostsByAuthor } from "@/firebase/posts";
 import { InlineEntities } from "@/components/common/inline-entities";
@@ -24,15 +26,16 @@ import { Avatar } from "@/components/common/avatar";
 import { setFollowingRelationship, subscribeToFollowerIds, subscribeToFollowCounts, subscribeToFollowRelationship, subscribeToFollowingIds } from "@/firebase/follows";
 import { useUiStore } from "@/store/use-ui-store";
 import { getXpProgress } from "@/constants/gamification";
+import { getNameColorValue, NAME_COLOR_OPTIONS } from "@/constants/name-colors";
 import { themePresets } from "@/lib/theme-presets";
 import { readCache, writeCache } from "@/lib/persistent-cache";
 import { banUserAccount } from "@/firebase/functions";
 import { subscribeToBookmarkedPosts } from "@/firebase/bookmarks";
-import { markNotificationRead, subscribeToNotifications } from "@/firebase/notifications";
+import { markAllNotificationsRead, markNotificationRead, subscribeToNotifications } from "@/firebase/notifications";
 import { UserBadges } from "@/components/common/user-badges";
 import { PostCard } from "@/components/posts/post-card";
 import { PostComposer } from "@/components/posts/post-composer";
-import type { Conversation, Message, NotificationItem, Post, UserProfile } from "@/types/models";
+import type { Conversation, Message, NotificationItem, Post, ThemeMode, UserProfile } from "@/types/models";
 
 function getFirebaseErrorMessage(error: unknown) {
   if (typeof error !== "object" || error === null) {
@@ -84,6 +87,8 @@ function getNotificationVisual(type: NotificationItem["type"]) {
       return { icon: Star, tint: "text-amber-300", chip: "bg-amber-500/15 text-amber-300", label: "Reaction" };
     case "follow":
       return { icon: UserPlus, tint: "text-emerald-300", chip: "bg-emerald-500/15 text-emerald-300", label: "Follow" };
+    case "mention":
+      return { icon: Bell, tint: "text-violet-300", chip: "bg-violet-500/15 text-violet-300", label: "Mention" };
     case "report":
       return { icon: TriangleAlert, tint: "text-[color:var(--error)]", chip: "bg-[color:var(--error)]/15 text-[color:var(--error)]", label: "Report" };
     case "level":
@@ -146,6 +151,26 @@ const BIO_MAX_LENGTH = 180;
 const LOCATION_MAX_LENGTH = 60;
 const DISPLAY_NAME_PATTERN = /^[A-Za-z0-9 ]+$/;
 const HANDLE_PATTERN = /^[a-z0-9_]+$/;
+const BASE_DAILY_GEM_REWARD = 25;
+const PREMIUM_DAILY_GEM_MULTIPLIER = 2;
+const FREE_THEME_IDS: ThemeMode[] = ["graphite", "mist"];
+const THEME_MARKET_PRICES: Record<ThemeMode, number> = {
+  graphite: 0,
+  mist: 0,
+  oled: 140,
+  aurora: 180,
+  nordic: 220,
+  synthwave: 260,
+  solarizedLight: 300,
+};
+
+function getOwnedThemeIds(profile: Pick<UserProfile, "ownedThemeIds" | "theme">) {
+  return [...new Set([...(profile.ownedThemeIds ?? FREE_THEME_IDS), profile.theme, ...FREE_THEME_IDS])];
+}
+
+function getDailyGemReward(isPremium: boolean) {
+  return BASE_DAILY_GEM_REWARD * (isPremium ? PREMIUM_DAILY_GEM_MULTIPLIER : 1);
+}
 
 function ReplyCard({
   reply,
@@ -166,7 +191,7 @@ function ReplyCard({
         <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} className="h-10 w-10 rounded-2xl" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="font-semibold">{author?.displayName ?? "Unknown profile"}</p>
+            <p className="font-semibold" style={{ color: getNameColorValue(author?.equippedNameColorId) }}>{author?.displayName ?? "Unknown profile"}</p>
             {author ? <span className="rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--accent)]">Lv {author.level}</span> : null}
             {author ? <UserBadges user={author} /> : null}
           </div>
@@ -194,19 +219,144 @@ function ReplyCard({
 }
 
 export function ExplorePage() {
+  const navigate = useNavigate();
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [profiles, setProfiles] = useState<UserProfile[]>([]);
+  const [queryText, setQueryText] = useState("");
+
+  useEffect(() => subscribeToPosts(setPosts), []);
+  useEffect(() => subscribeToUserProfiles(setProfiles), []);
+
+  const normalizedQuery = queryText.trim().toLowerCase();
+  const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
+  const postLookup = useMemo(() => new Map(posts.map((post) => [post.id, post])), [posts]);
+  const filteredPosts = useMemo(() => {
+    if (!queryTokens.length) {
+      return posts;
+    }
+
+    return posts.filter((post) => {
+      const haystack = `${post.content} ${post.tags.map((tag) => `#${tag}`).join(" ")}`.toLowerCase();
+      return queryTokens.every((token) => haystack.includes(token));
+    });
+  }, [posts, queryTokens]);
+  const filteredProfiles = useMemo(() => {
+    if (!queryTokens.length) {
+      return profiles.slice(0, 8);
+    }
+
+    return profiles.filter((profile) => {
+      const haystack = `${profile.displayName} @${profile.handle} ${profile.bio} ${profile.location}`.toLowerCase();
+      return queryTokens.every((token) => haystack.includes(token));
+    }).slice(0, 8);
+  }, [profiles, queryTokens]);
+  const replyContextLabels = useMemo(() => {
+    return filteredPosts.reduce<Record<string, string | null>>((accumulator, post) => {
+      const replyTargetId = post.replyToPostId ?? post.parentPostId;
+      if (!replyTargetId) {
+        accumulator[post.id] = null;
+        return accumulator;
+      }
+
+      const replyTarget = postLookup.get(replyTargetId);
+      const replyAuthor = profiles.find((profile) => profile.uid === replyTarget?.authorId);
+      accumulator[post.id] = replyAuthor ? `@${replyAuthor.handle}` : null;
+      return accumulator;
+    }, {});
+  }, [filteredPosts, postLookup, profiles]);
+  const trendingTags = useMemo(() => {
+    const counts = posts.reduce<Record<string, number>>((accumulator, post) => {
+      post.tags.forEach((tag) => {
+        const normalizedTag = `#${tag.toLowerCase()}`;
+        accumulator[normalizedTag] = (accumulator[normalizedTag] ?? 0) + 1;
+      });
+      return accumulator;
+    }, {});
+
+    return Object.entries(counts)
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 6);
+  }, [posts]);
+
+  function appendSearchToken(token: string) {
+    setQueryText((current) => {
+      const normalizedToken = token.toLowerCase();
+      const existingTokens = current.trim().split(/\s+/).filter(Boolean);
+      if (existingTokens.map((item) => item.toLowerCase()).includes(normalizedToken)) {
+        return current;
+      }
+      return [...existingTokens, token].join(" ").trim();
+    });
+  }
+
   return (
-    <PageFrame title="Explore" subtitle="Search, trends, suggested users, and popular posts are composed into one discovery surface for the demo." titleIcon={Search}>
-      <Card className="p-6">
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Search size={16} />
-              <p className="font-semibold">Search</p>
-            </div>
-            <p className="text-sm text-textMuted">Search is not functional in the demo, but this surface would normally show search results for posts and users.</p>
-          </div>
+    <PageFrame title="Explore" subtitle="Search users, posts, hashtags, and replies from one discovery surface." titleIcon={Search}>
+      <Card className="space-y-4 p-5">
+        <div className="relative">
+          <Search size={16} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-textMuted" />
+          <input
+            value={queryText}
+            onChange={(event) => setQueryText(event.target.value)}
+            placeholder="Search users, posts, #hashtags, or @handles"
+            className="w-full rounded-[1.5rem] border border-border bg-surface px-11 py-3 text-sm outline-none focus:border-[color:var(--accent)]"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {trendingTags.map(([tag, count]) => (
+            <button
+              key={tag}
+              type="button"
+              className="rounded-full border border-border bg-surfaceAlt px-3 py-1.5 text-xs font-semibold text-[color:var(--accent)]"
+              onClick={() => appendSearchToken(tag)}
+            >
+              {tag} · {count}
+            </button>
+          ))}
         </div>
       </Card>
+
+      <Card className="space-y-4 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="font-semibold">People</p>
+            <p className="text-sm text-textMuted">Open a profile directly from search results.</p>
+          </div>
+          <span className="text-xs text-textMuted">{filteredProfiles.length} result{filteredProfiles.length === 1 ? "" : "s"}</span>
+        </div>
+        {filteredProfiles.length ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {filteredProfiles.map((profile) => (
+              <button
+                key={profile.uid}
+                type="button"
+                className="flex items-center gap-3 rounded-3xl border border-border bg-surface p-4 text-left transition hover:border-[color:var(--accent)] hover:bg-surfaceAlt/40"
+                onClick={() => navigate(`/profile/${profile.handle}`)}
+              >
+                <Avatar name={profile.displayName} src={profile.photoURL} className="h-12 w-12 rounded-2xl" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-semibold" style={{ color: getNameColorValue(profile.equippedNameColorId) }}>{profile.displayName}</p>
+                  <p className="text-sm text-textMuted">@{profile.handle}</p>
+                  <p className="mt-1 line-clamp-2 text-sm text-textMuted">{profile.bio || "No bio yet."}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-3xl border border-dashed border-border p-5 text-sm text-textMuted">No users matched that search yet.</div>
+        )}
+      </Card>
+
+      <div className="space-y-4">
+        {filteredPosts.length ? filteredPosts.map((post) => (
+          <PostCard
+            key={post.id}
+            post={post}
+            replyContextLabel={replyContextLabels[post.id]}
+          />
+        )) : (
+          <Card className="p-6 text-sm text-textMuted">No posts matched that search yet.</Card>
+        )}
+      </div>
     </PageFrame>
   );
 }
@@ -387,7 +537,7 @@ export function ProfilePage() {
               </div>
               <div className="min-w-0 flex-1 pb-1">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <p className="min-w-0 text-2xl font-bold">{user.displayName}</p>
+                  <p className="min-w-0 text-2xl font-bold" style={{ color: getNameColorValue(user.equippedNameColorId) }}>{user.displayName}</p>
                   <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
                     <Button
                       variant={isOwnProfile || isFollowing ? "secondary" : "primary"}
@@ -529,8 +679,24 @@ export function ProfilePage() {
 }
 
 export function SettingsPage() {
+  const { user } = useAuth();
   const { theme, textScale, setTheme, setTextScale } = useUiStore();
   const availableThemes = Object.entries(themePresets);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+
+  useEffect(() => {
+    if (!user) {
+      setProfile(null);
+      return;
+    }
+
+    return subscribeToUserProfileById(user.uid, setProfile);
+  }, [user]);
+
+  const ownedThemeIds = profile ? getOwnedThemeIds(profile) : FREE_THEME_IDS;
+  const ownedNameColors = (profile?.ownedNameColorIds ?? ["default"])
+    .map((colorId) => NAME_COLOR_OPTIONS.find((item) => item.id === colorId))
+    .filter((option): option is (typeof NAME_COLOR_OPTIONS)[number] => Boolean(option));
 
   return (
     <PageFrame title="Settings" subtitle="Appearance, account controls, and release notes live here.">
@@ -543,6 +709,7 @@ export function SettingsPage() {
           <div className="grid gap-3">
             {availableThemes.map(([themeKey, definition]) => {
               const isActive = theme === themeKey;
+              const isOwned = ownedThemeIds.includes(themeKey as ThemeMode);
 
               return (
                 <details
@@ -558,17 +725,44 @@ export function SettingsPage() {
                     <Button
                       type="button"
                       variant={isActive ? "primary" : "secondary"}
+                      disabled={!isOwned}
                       onClick={(event) => {
                         event.preventDefault();
+                        if (!isOwned) {
+                          return;
+                        }
                         setTheme(themeKey as keyof typeof themePresets);
                       }}
                     >
-                      {isActive ? "Active theme" : "Use theme"}
+                      {isActive ? "Active theme" : isOwned ? "Use theme" : "Unlock in market"}
                     </Button>
                   </summary>
                 </details>
               );
             })}
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold">Name color</p>
+              <Link to="/market" className="text-sm font-semibold text-[color:var(--accent)]">More in market</Link>
+            </div>
+            <select
+              value={profile?.equippedNameColorId ?? "default"}
+              disabled={!user || !profile}
+              onChange={(event) => {
+                if (!user || !profile) {
+                  return;
+                }
+                void updateUserProfile(user.uid, { equippedNameColorId: event.target.value });
+              }}
+              className="w-full rounded-2xl border border-border bg-surface px-4 py-3 text-sm outline-none"
+            >
+              {ownedNameColors.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name} · {option.rarity}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -1476,14 +1670,18 @@ export function ChatPage() {
 
 export function NotificationsPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [items, setItems] = useState<NotificationItem[]>([]);
+  const unreadCount = items.filter((item) => !item.read).length;
 
-  async function handleMarkRead(notificationId: string, read: boolean) {
-    if (read) {
-      return;
+  async function handleNotificationClick(item: NotificationItem) {
+    if (!item.read) {
+      await markNotificationRead(item.id);
     }
 
-    await markNotificationRead(notificationId);
+    if (item.postId) {
+      navigate(`/post/${item.postId}`);
+    }
   }
 
   useEffect(() => {
@@ -1496,7 +1694,7 @@ export function NotificationsPage() {
   }, [user]);
 
   return (
-    <PageFrame title="Notifications" subtitle="Live activity from replies, ratings, follows, reports, rotten tomatoes, and level-ups.">
+    <PageFrame title="Notifications" subtitle="Live activity from replies, follows, mentions, rotten tomatoes, reports, and level-ups.">
       {!user ? (
         <Card className="p-6 text-sm text-textMuted">Sign in to view your notifications.</Card>
       ) : (
@@ -1506,11 +1704,21 @@ export function NotificationsPage() {
               <p className="text-sm font-semibold">Live activity</p>
               <p className="text-sm text-textMuted">{items.length ? `${items.length} notification${items.length === 1 ? "" : "s"}` : "No notifications yet"}</p>
             </div>
-            {items.some((item) => !item.read) ? (
-              <div className="rounded-full bg-[color:var(--error)]/15 px-3 py-1 text-xs font-semibold text-[color:var(--error)]">
-                {items.filter((item) => !item.read).length} unread
-              </div>
-            ) : null}
+            <div className="flex items-center gap-2">
+              {unreadCount ? (
+                <div className="rounded-full bg-[color:var(--error)]/15 px-3 py-1 text-xs font-semibold text-[color:var(--error)]">
+                  {unreadCount} unread
+                </div>
+              ) : null}
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!unreadCount}
+                onClick={() => void (user ? markAllNotificationsRead(user.uid) : Promise.resolve())}
+              >
+                Read all
+              </Button>
+            </div>
           </Card>
 
           <Card className="space-y-3 p-4">
@@ -1527,7 +1735,7 @@ export function NotificationsPage() {
                     ? "border-border bg-surface hover:bg-surfaceAlt/40"
                     : "border-[color:var(--accent)]/25 bg-[color:var(--accent)]/8 hover:bg-[color:var(--accent)]/12"
                 }`}
-                onClick={() => void handleMarkRead(item.id, item.read)}
+                onClick={() => void handleNotificationClick(item)}
               >
                 <div className="flex items-start gap-4">
                   <div className={`mt-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-surfaceAlt ${visual.tint}`}>
@@ -1551,7 +1759,7 @@ export function NotificationsPage() {
             );
           }) : (
             <div className="rounded-3xl border border-dashed border-border p-8 text-center text-sm text-textMuted">
-              Notifications will appear here as people reply, rate posts, follow you, report content, or when your account levels up.
+              Notifications will appear here as people reply, mention you, follow you, report content, throw rotten tomatoes, or when your account levels up.
             </div>
           )}
           </Card>
@@ -1701,6 +1909,7 @@ export function BookmarksPage() {
 
 export function ArcadePage() {
   const { user } = useAuth();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [claimedToday, setClaimedToday] = useState(false);
   const rewardKey = "pulsearc-daily-gems";
 
@@ -1708,38 +1917,246 @@ export function ArcadePage() {
     setClaimedToday(window.localStorage.getItem(rewardKey) === new Date().toDateString());
   }, []);
 
-  return (
-    <PageFrame title="Arcade" subtitle="Gambling, slot machines, and daily rewards. Big Payouts, Bigger rewards">
-      <div className="space-y-5">
-        <Card className="flex items-center justify-between gap-4 p-6">
-          <div>
-            <p className="font-semibold">Daily gem reward</p>
-          </div>
-          <Button
-            variant={claimedToday ? "secondary" : "primary"}
-            disabled={claimedToday}
-            onClick={async () => {
-              if (!user) {
-                return;
-              }
+  useEffect(() => {
+    if (!user) {
+      setProfile(null);
+      return;
+    }
 
-              await addGemsToUser(user.uid, 10);
-              window.localStorage.setItem(rewardKey, new Date().toDateString());
-              setClaimedToday(true);
-              toast.success("Daily gems claimed", { description: "+10 gems added to your account" });
-            }}
-          >
-            {claimedToday ? "Claimed" : "+10 Gems"}
-          </Button>
+    return subscribeToUserProfileById(user.uid, setProfile);
+  }, [user]);
+
+  const rewardAmount = getDailyGemReward(profile?.isPremium ?? false);
+
+  return (
+    <PageFrame title="Arcade" subtitle="Daily rewards and wager games.">
+      <div className="space-y-5">
+        <Card className="p-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="font-semibold">Daily gem reward</p>
+              <p className="text-sm text-textMuted">
+                {profile?.isPremium ? `Premium active: +${rewardAmount} gems per day.` : `Claim +${rewardAmount} gems once per day.`}
+              </p>
+            </div>
+            <Button
+              variant={claimedToday ? "secondary" : "primary"}
+              disabled={claimedToday}
+              onClick={async () => {
+                if (!user) {
+                  return;
+                }
+
+                await addGemsToUser(user.uid, rewardAmount);
+                window.localStorage.setItem(rewardKey, new Date().toDateString());
+                setClaimedToday(true);
+                toast.success("Daily gems claimed", { description: `+${rewardAmount} gems added to your account` });
+              }}
+            >
+              {claimedToday ? "Claimed" : `+${rewardAmount} Gems`}
+            </Button>
+          </div>
         </Card>
-        <SlotMachine />
+        <div className="space-y-5">
+          <SlotMachine />
+          <CoinToss />
+          <DiceGame />
+        </div>
       </div>
     </PageFrame>
   );
 }
 
 export function MarketPage() {
-  return <PageFrame title="Market" subtitle="Coming soon. Spend your gems on cosmetics, themes, badges, and more" />;
+  const { user } = useAuth();
+  const { setTheme } = useUiStore();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const themeOptions = Object.entries(themePresets).map(([id, definition]) => ({
+    id: id as ThemeMode,
+    ...definition,
+    price: THEME_MARKET_PRICES[id as ThemeMode],
+  }));
+
+  useEffect(() => {
+    if (!user) {
+      setProfile(null);
+      return;
+    }
+
+    return subscribeToUserProfileById(user.uid, setProfile);
+  }, [user]);
+
+  async function buyNameColor(colorId: string) {
+    if (!user || !profile) {
+      return;
+    }
+
+    const option = NAME_COLOR_OPTIONS.find((item) => item.id === colorId);
+    if (!option) {
+      return;
+    }
+    if ((profile.ownedNameColorIds ?? []).includes(colorId)) {
+      await updateUserProfile(user.uid, { equippedNameColorId: colorId });
+      toast.success(`${option.name} equipped`);
+      return;
+    }
+    if (profile.gems < option.price) {
+      toast.error("Not enough gems for that color.");
+      return;
+    }
+
+    await addGemsToUser(user.uid, -option.price);
+    await updateUserProfile(user.uid, {
+      ownedNameColorIds: [...new Set([...(profile.ownedNameColorIds ?? ["default"]), colorId])],
+      equippedNameColorId: colorId,
+    });
+    toast.success(`${option.name} purchased and equipped`);
+  }
+
+  async function buyTheme(themeId: ThemeMode) {
+    if (!user || !profile) {
+      return;
+    }
+
+    const option = themeOptions.find((item) => item.id === themeId);
+    if (!option) {
+      return;
+    }
+
+    const ownedThemeIds = getOwnedThemeIds(profile);
+    const owned = ownedThemeIds.includes(themeId);
+    if (owned) {
+      await updateUserProfile(user.uid, { theme: themeId });
+      setTheme(themeId);
+      toast.success(`${option.label} equipped`);
+      return;
+    }
+
+    if (profile.gems < option.price) {
+      toast.error("Not enough gems for that theme.");
+      return;
+    }
+
+    await addGemsToUser(user.uid, -option.price);
+    await updateUserProfile(user.uid, {
+      ownedThemeIds: [...new Set([...ownedThemeIds, themeId])],
+      theme: themeId,
+    });
+    setTheme(themeId);
+    toast.success(`${option.label} purchased and equipped`);
+  }
+
+  return (
+    <PageFrame title="Market" subtitle="Spend gems on compact profile cosmetics, then unlock premium themes below your nameplate collection.">
+      {!user || !profile ? (
+        <Card className="p-6 text-sm text-textMuted">Sign in to browse the market.</Card>
+      ) : (
+        <div className="space-y-5">
+          <Card className="flex flex-wrap items-center justify-between gap-4 p-5">
+            <div>
+              <p className="text-sm text-textMuted">Preview</p>
+              <p className="mt-1 text-2xl font-bold" style={{ color: getNameColorValue(profile.equippedNameColorId) }}>{profile.displayName}</p>
+              <p className="mt-1 text-sm text-textMuted">@{profile.handle}</p>
+            </div>
+            <div className="rounded-2xl border border-border bg-surface px-4 py-3 text-right">
+              <p className="text-xs uppercase tracking-[0.18em] text-textMuted">Gems</p>
+              <p className="mt-1 text-xl font-bold">{profile.gems}</p>
+            </div>
+          </Card>
+
+          <div className="space-y-3">
+            <div>
+              <h2 className="text-lg font-semibold">Nameplates</h2>
+              <p className="text-sm text-textMuted">Compact rarity, color, and a fast buy or equip action.</p>
+            </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {NAME_COLOR_OPTIONS.map((option) => {
+              const owned = (profile.ownedNameColorIds ?? ["default"]).includes(option.id);
+              const equipped = profile.equippedNameColorId === option.id;
+
+              return (
+                <Card key={option.id} className="space-y-3 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="rounded-full bg-surfaceAlt px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-textMuted">
+                      {option.rarity}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="h-3.5 w-3.5 rounded-full border border-border" style={{ background: option.color }} />
+                      <span className="text-sm font-semibold" style={{ color: option.color }}>{option.name}</span>
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3 text-sm">
+                    <p className="font-bold" style={{ color: option.color }}>{profile.displayName}</p>
+                  </div>
+                  <Button
+                    className="w-full"
+                    variant={equipped ? "secondary" : "primary"}
+                    disabled={equipped}
+                    onClick={() => void buyNameColor(option.id)}
+                  >
+                    {equipped ? "Equipped" : owned ? "Equip" : `Buy for ${option.price}`}
+                  </Button>
+                </Card>
+              );
+            })}
+          </div>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <h2 className="text-lg font-semibold">Themes</h2>
+              <p className="text-sm text-textMuted">`Graphite` and `Mist` stay free. Everything else is unlocked with gems.</p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {themeOptions.map((option) => {
+                const owned = getOwnedThemeIds(profile).includes(option.id);
+                const equipped = profile.theme === option.id;
+
+                return (
+                  <Card key={option.id} className="space-y-4 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-semibold">{option.label}</p>
+                        <p className="text-xs text-textMuted">{owned ? "Owned" : `${option.price} gems`}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="h-4 w-4 rounded-full border border-border" style={{ background: option.tokens.background }} />
+                        <span className="h-4 w-4 rounded-full border border-border" style={{ background: option.tokens.surface }} />
+                        <span className="h-4 w-4 rounded-full border border-border" style={{ background: option.tokens.accent }} />
+                      </div>
+                    </div>
+                    <p className="text-sm text-textMuted">{option.description}</p>
+                    <div
+                      className="rounded-3xl border p-4"
+                      style={{
+                        background: option.tokens.background,
+                        borderColor: option.tokens.border,
+                        color: option.tokens.text,
+                      }}
+                    >
+                      <p className="font-semibold" style={{ color: option.tokens.text }}>{profile.displayName}</p>
+                      <p className="text-sm" style={{ color: option.tokens.textMuted }}>@{profile.handle}</p>
+                      <div className="mt-3 h-2 rounded-full" style={{ background: option.tokens.surfaceAlt }}>
+                        <div className="h-2 w-2/3 rounded-full" style={{ background: option.tokens.accent }} />
+                      </div>
+                    </div>
+                    <Button
+                      className="w-full"
+                      variant={equipped ? "secondary" : "primary"}
+                      disabled={equipped}
+                      onClick={() => void buyTheme(option.id)}
+                    >
+                      {equipped ? "Equipped" : owned ? "Equip" : `Buy for ${option.price}`}
+                    </Button>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </PageFrame>
+  );
 }
 
 export function ShopPage() {
@@ -1759,39 +2176,56 @@ export function ShopPage() {
 }
 
 export function LeaderboardPage() {
+  const navigate = useNavigate();
   const [leaders, setLeaders] = useState(users);
 
   useEffect(() => subscribeToXpLeaderboard(setLeaders), []);
 
   return (
-    <PageFrame title="Leaderboard" subtitle="Top users by level">
-      <Card className="space-y-3 p-6">
+    <PageFrame title="Leaderboard" subtitle="Top users ranked by level only. XP no longer affects placement.">
+      <div className="space-y-4">
         {leaders.map((leader, index) => {
-          const progress = getXpProgress(leader.xp, leader.level);
-
           return (
-            <div key={leader.uid} className="flex items-center justify-between gap-4 rounded-2xl border border-border p-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[color:var(--accent)]/15 text-sm font-bold text-[color:var(--accent)]">
-                  {index + 1}
+            <Card key={leader.uid} className="overflow-hidden p-0">
+              <div className="h-24 w-full" style={formatBannerStyle(leader)} />
+              <div className="relative p-5">
+                <div className="absolute -top-8 left-5 flex h-16 w-16 items-center justify-center rounded-[1.75rem] border-4 border-canvas bg-canvas">
+                  <Avatar name={leader.displayName} src={leader.photoURL} className="h-full w-full rounded-[1.2rem]" />
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    {index === 0 ? <Crown size={16} className="text-[color:var(--accent)]" /> : null}
-                    <span className="font-semibold">{leader.displayName}</span>
+                <div className="flex items-start justify-between gap-4 pt-10">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-[color:var(--accent)]/15 px-3 py-1 text-xs font-semibold text-[color:var(--accent)]">
+                        #{index + 1}
+                      </span>
+                      {index === 0 ? <Crown size={16} className="text-[color:var(--accent)]" /> : null}
+                      <button
+                        type="button"
+                        className="truncate text-left text-lg font-semibold hover:underline"
+                        onClick={() => navigate(`/profile/${leader.handle}`)}
+                      >
+                        <span style={{ color: getNameColorValue(leader.equippedNameColorId) }}>{leader.displayName}</span>
+                      </button>
+                    </div>
+                    <p className="mt-1 text-sm text-textMuted">@{leader.handle}</p>
+                    <p className="mt-2 line-clamp-2 text-sm text-textMuted">{leader.bio || "No bio yet."}</p>
                   </div>
-                  <p className="text-sm text-textMuted">@{leader.handle}</p>
+                  <div className="rounded-2xl border border-border bg-surface/80 px-4 py-3 text-right backdrop-blur-sm">
+                    <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Level</p>
+                    <p className="mt-1 text-2xl font-bold">{leader.level}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-textMuted">
+                  <span>{leader.followerCount} followers</span>
+                  <span>{leader.postCount} posts</span>
+                  <span>{leader.isPremium ? "Premium" : "Standard"}</span>
                 </div>
               </div>
-              <div className="text-right">
-                <p className="text-sm font-semibold">Level {leader.level}</p>
-                <p className="text-sm text-textMuted">{leader.xp} XP</p>
-                <p className="text-xs text-textMuted">{progress.earned}/{progress.needed} to next level</p>
-              </div>
-            </div>
+            </Card>
           );
         })}
-      </Card>
+      </div>
     </PageFrame>
   );
 }

@@ -156,7 +156,6 @@ function getStarRatingXpReward(stars: number) {
 export async function ratePost(postId: string, user: UserProfile, stars: number) {
   const reactionRef = doc(db, COLLECTIONS.reactions, reactionDocId(postId, user.uid, "star"));
   const postRef = doc(db, COLLECTIONS.posts, postId);
-  let authorId: string | null = null;
   let isFirstStarRating = false;
 
   await runTransaction(db, async (transaction) => {
@@ -166,7 +165,6 @@ export async function ratePost(postId: string, user: UserProfile, stars: number)
       throw new Error("Post not found.");
     }
 
-    authorId = String(postSnapshot.data().authorId ?? "");
     const currentCount = Number(postSnapshot.data().starRatingCount ?? 0);
     const currentAverage = Number(postSnapshot.data().averageRating ?? 0);
     const previousStars = reactionSnapshot.exists() && reactionSnapshot.data().type === "star"
@@ -195,17 +193,6 @@ export async function ratePost(postId: string, user: UserProfile, stars: number)
   const xpReward = getStarRatingXpReward(stars);
   if (isFirstStarRating && xpReward > 0) {
     await addXpToUser(user.uid, xpReward);
-  }
-
-  if (authorId && authorId !== user.uid) {
-    await createNotification({
-      type: "reaction",
-      title: "New star rating",
-      body: `${user.displayName} rated your post ${stars}/5 stars.`,
-      actorId: user.uid,
-      userId: authorId,
-      postId,
-    });
   }
 }
 
@@ -344,8 +331,8 @@ export async function throwRottenTomato(postId: string, user: UserProfile) {
     await createNotification({
       type: "reaction",
       title: "A rotten tomato hit your post",
-      body: `${user.displayName} spent 5 gems to throw a rotten tomato at your post.`,
-      actorId: user.uid,
+      body: "Someone spent 5 gems to throw a rotten tomato at your post.",
+      actorId: null,
       userId: authorId,
       postId,
     });

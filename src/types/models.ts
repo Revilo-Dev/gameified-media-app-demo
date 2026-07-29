@@ -46,6 +46,9 @@ export interface UserProfile {
   accentColor: string;
   gems: number;
   casinoCoins: number;
+  ownedNameColorIds: string[];
+  ownedThemeIds: ThemeMode[];
+  equippedNameColorId: string | null;
   followerCount: number;
   followingCount: number;
   postCount: number;
@@ -120,6 +123,15 @@ export interface ShopItem {
   category: string;
   rarity: BadgeRarity;
   price: number;
+  description: string;
+}
+
+export interface NameColorOption {
+  id: string;
+  name: string;
+  color: string;
+  price: number;
+  rarity: BadgeRarity;
   description: string;
 }
 

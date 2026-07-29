@@ -31,6 +31,7 @@ import { subscribeToFollowCounts } from "@/firebase/follows";
 import { createNotification, subscribeToNotifications } from "@/firebase/notifications";
 import { subscribeToLeaderboardRank } from "@/firebase/posts";
 import { addGemsToUser, addXpToUser } from "@/firebase/users";
+import { getNameColorValue } from "@/constants/name-colors";
 import { users } from "@/lib/demo-data";
 import { readCache, writeCache } from "@/lib/persistent-cache";
 import { useUiStore } from "@/store/use-ui-store";
@@ -60,6 +61,12 @@ const mobileSecondaryNavItems = [
   { to: "/premium", label: "Premium", icon: Crown },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
+const BASE_DAILY_GEM_REWARD = 25;
+const PREMIUM_DAILY_GEM_MULTIPLIER = 2;
+
+function getDailyGemReward(isPremium: boolean) {
+  return BASE_DAILY_GEM_REWARD * (isPremium ? PREMIUM_DAILY_GEM_MULTIPLIER : 1);
+}
 
 export function AppLayout() {
   const { user } = useAuth();
@@ -81,6 +88,7 @@ export function AppLayout() {
   const rewardKey = "pulsearc-daily-gems";
   const profileCacheKey = user ? `cache:sidebar-profile:${user.uid}` : null;
   const followCacheKey = user ? `cache:sidebar-follows:${user.uid}` : null;
+  const dailyGemReward = getDailyGemReward(profile.isPremium);
 
   useEffect(() => {
     if (!profileCacheKey || !followCacheKey) {
@@ -247,7 +255,7 @@ export function AppLayout() {
             <Link to={profilePath} className="flex items-center gap-4 transition hover:opacity-80">
               <Avatar name={profile.displayName} src={profile.photoURL} />
               <div>
-                <p className="font-semibold">{profile.displayName}</p>
+                <p className="font-semibold" style={{ color: getNameColorValue(profile.equippedNameColorId) }}>{profile.displayName}</p>
                 <p className="text-sm text-textMuted">@{profile.handle}</p>
               </div>
             </Link>
@@ -279,13 +287,13 @@ export function AppLayout() {
               disabled={claimedToday}
               className="w-full"
               onClick={async () => {
-                await addGemsToUser(user.uid, 10);
+                await addGemsToUser(user.uid, dailyGemReward);
                 window.localStorage.setItem(rewardKey, new Date().toDateString());
                 setClaimedToday(true);
               }}
             >
               <Gem size={16} />
-              {claimedToday ? "Daily gems claimed" : "Redeem daily gems"}
+              {claimedToday ? "Daily gems claimed" : `Redeem +${dailyGemReward} gems`}
             </Button>
             <NavLink to="/premium" className="flex items-center gap-2 rounded-full bg-[color:var(--accent)] px-4 py-2 text-sm font-semibold text-white shadow-panel">
               <Crown size={16} /> Go Premium

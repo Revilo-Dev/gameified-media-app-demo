@@ -43,6 +43,7 @@ const navItems = [
   { to: "/chat", label: "Chat", icon: MessageSquare },
   { to: "/arcade", label: "Arcade", icon: Gamepad2 },
   { to: "/market", label: "Market", icon: LayoutGrid },
+  { to: "/crypto", label: "Crypto", icon: Gem },
   { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
 ];
 
@@ -56,6 +57,7 @@ const mobilePrimaryNavItems = [
 const mobileSecondaryNavItems = [
   { to: "/arcade", label: "Arcade", icon: Gamepad2 },
   { to: "/market", label: "Market", icon: LayoutGrid },
+  { to: "/crypto", label: "Crypto", icon: Gem },
   { to: "/notifications", label: "Notifications", icon: Bell },
   { to: null, label: "Profile", icon: Bookmark },
   { to: "/premium", label: "Premium", icon: Crown },

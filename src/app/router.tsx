@@ -48,6 +48,7 @@ export const router = createBrowserRouter([
       { path: "bookmarks", element: lazyElement(() => import("@/pages/simple-pages"), "BookmarksPage") },
       { path: "arcade", element: lazyElement(() => import("@/pages/simple-pages"), "ArcadePage") },
       { path: "market", element: lazyElement(() => import("@/pages/simple-pages"), "MarketPage") },
+      { path: "crypto", element: lazyElement(() => import("@/pages/simple-pages"), "CryptoPage") },
       { path: "shop", element: lazyElement(() => import("@/pages/simple-pages"), "ShopPage") },
       { path: "leaderboard", element: lazyElement(() => import("@/pages/simple-pages"), "LeaderboardPage") },
       { path: "about", element: lazyElement(() => import("@/pages/simple-pages"), "AboutPage") },

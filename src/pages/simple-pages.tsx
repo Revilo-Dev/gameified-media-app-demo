@@ -18,7 +18,7 @@ import { conversations, messages, shopItems, users } from "@/lib/demo-data";
 import { bannerPresets } from "@/lib/banner-presets";
 import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/auth";
 import { useAuth } from "@/app/auth-provider";
-import { addGemsToUser, addXpToUser, ensureUserProfile, getDemoUserByHandle, isHandleAvailable, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
+import { addGemsToUser, addXpToUser, ensureUserProfile, getDemoUserByHandle, investGemsInCoin, isHandleAvailable, sellCoinForGems, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToUserProfiles, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
 import { changeUserPassword, linkGoogleAccount, updateDisplayName, uploadProfileBanner, uploadProfilePicture } from "@/firebase/auth";
 import { deletePostCascade, subscribeToPosts, subscribeToPostsByAuthor } from "@/firebase/posts";
 import { InlineEntities } from "@/components/common/inline-entities";
@@ -26,7 +26,7 @@ import { Avatar } from "@/components/common/avatar";
 import { setFollowingRelationship, subscribeToFollowerIds, subscribeToFollowCounts, subscribeToFollowRelationship, subscribeToFollowingIds } from "@/firebase/follows";
 import { useUiStore } from "@/store/use-ui-store";
 import { getXpProgress } from "@/constants/gamification";
-import { getNameColorValue, NAME_COLOR_OPTIONS } from "@/constants/name-colors";
+import { getNameColorStyle, getNameColorValue, NAME_COLOR_OPTIONS } from "@/constants/name-colors";
 import { themePresets } from "@/lib/theme-presets";
 import { readCache, writeCache } from "@/lib/persistent-cache";
 import { banUserAccount } from "@/firebase/functions";
@@ -35,7 +35,7 @@ import { markAllNotificationsRead, markNotificationRead, subscribeToNotification
 import { UserBadges } from "@/components/common/user-badges";
 import { PostCard } from "@/components/posts/post-card";
 import { PostComposer } from "@/components/posts/post-composer";
-import type { Conversation, Message, NotificationItem, Post, ThemeMode, UserProfile } from "@/types/models";
+import type { Conversation, CryptoCoinId, Message, NotificationItem, Post, ThemeMode, UserProfile } from "@/types/models";
 
 function getFirebaseErrorMessage(error: unknown) {
   if (typeof error !== "object" || error === null) {
@@ -102,6 +102,16 @@ function getNotificationVisual(type: NotificationItem["type"]) {
 
 const changelogEntries = [
   {
+    version: "V0.7",
+    date: "August 2, 2026",
+    items: [
+      "Crypto was rebuilt into a five-coin market with live buy and sell sliders, per-coin holdings, trade-driven price movement, and moderator buff or nerf controls.",
+      "The crypto dashboard now uses denser market-style charts, wider history windows, stronger controls, and a cleaner one-column layout that fits the app's visual language better.",
+      "Market pricing was rebalanced upward, five animated bonus nameplates were added, and several new premium themes were added for gem purchase.",
+      "Theme previews, market cards, and changelog messaging were refreshed to support the broader economy update and make cosmetic progression feel more substantial.",
+    ],
+  },
+  {
     version: "V0.58",
     date: "July 28, 2026",
     items: [
@@ -157,11 +167,14 @@ const FREE_THEME_IDS: ThemeMode[] = ["graphite", "mist"];
 const THEME_MARKET_PRICES: Record<ThemeMode, number> = {
   graphite: 0,
   mist: 0,
-  oled: 140,
-  aurora: 180,
-  nordic: 220,
-  synthwave: 260,
-  solarizedLight: 300,
+  oled: 1400,
+  aurora: 1800,
+  nordic: 2200,
+  synthwave: 2600,
+  solarizedLight: 3000,
+  midnightRose: 3400,
+  lagoon: 3600,
+  sunsetClub: 3800,
 };
 
 function getOwnedThemeIds(profile: Pick<UserProfile, "ownedThemeIds" | "theme">) {
@@ -191,7 +204,7 @@ function ReplyCard({
         <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} className="h-10 w-10 rounded-2xl" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="font-semibold" style={{ color: getNameColorValue(author?.equippedNameColorId) }}>{author?.displayName ?? "Unknown profile"}</p>
+            <p className="font-semibold" style={getNameColorStyle(author?.equippedNameColorId)}>{author?.displayName ?? "Unknown profile"}</p>
             {author ? <span className="rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--accent)]">Lv {author.level}</span> : null}
             {author ? <UserBadges user={author} /> : null}
           </div>
@@ -334,7 +347,7 @@ export function ExplorePage() {
               >
                 <Avatar name={profile.displayName} src={profile.photoURL} className="h-12 w-12 rounded-2xl" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold" style={{ color: getNameColorValue(profile.equippedNameColorId) }}>{profile.displayName}</p>
+                  <p className="truncate font-semibold" style={getNameColorStyle(profile.equippedNameColorId)}>{profile.displayName}</p>
                   <p className="text-sm text-textMuted">@{profile.handle}</p>
                   <p className="mt-1 line-clamp-2 text-sm text-textMuted">{profile.bio || "No bio yet."}</p>
                 </div>
@@ -537,7 +550,7 @@ export function ProfilePage() {
               </div>
               <div className="min-w-0 flex-1 pb-1">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <p className="min-w-0 text-2xl font-bold" style={{ color: getNameColorValue(user.equippedNameColorId) }}>{user.displayName}</p>
+                  <p className="min-w-0 text-2xl font-bold" style={getNameColorStyle(user.equippedNameColorId)}>{user.displayName}</p>
                   <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
                     <Button
                       variant={isOwnProfile || isFollowing ? "secondary" : "primary"}
@@ -2055,7 +2068,7 @@ export function MarketPage() {
           <Card className="flex flex-wrap items-center justify-between gap-4 p-5">
             <div>
               <p className="text-sm text-textMuted">Preview</p>
-              <p className="mt-1 text-2xl font-bold" style={{ color: getNameColorValue(profile.equippedNameColorId) }}>{profile.displayName}</p>
+              <p className="mt-1 text-2xl font-bold" style={getNameColorStyle(profile.equippedNameColorId)}>{profile.displayName}</p>
               <p className="mt-1 text-sm text-textMuted">@{profile.handle}</p>
             </div>
             <div className="rounded-2xl border border-border bg-surface px-4 py-3 text-right">
@@ -2086,7 +2099,7 @@ export function MarketPage() {
                     </div>
                   </div>
                   <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3 text-sm">
-                    <p className="font-bold" style={{ color: option.color }}>{profile.displayName}</p>
+                    <p className="font-bold" style={option.animated ? getNameColorStyle(option.id) : { color: option.color }}>{profile.displayName}</p>
                   </div>
                   <Button
                     className="w-full"
@@ -2159,18 +2172,109 @@ export function MarketPage() {
   );
 }
 
-const emeraldPacks = [
-  { id: "starter", name: "Starter stake", gems: 10, tone: "from-emerald-500/20 to-cyan-500/10" },
-  { id: "builder", name: "Builder stake", gems: 25, tone: "from-teal-500/20 to-lime-500/10" },
-  { id: "whale", name: "Vault stake", gems: 50, tone: "from-green-500/20 to-sky-500/10" },
+const CRYPTO_MARKET_KEY = "pulsearc-crypto-market";
+const CRYPTO_UPDATE_INTERVAL_MS = 10 * 60 * 1000;
+const CRYPTO_HISTORY_LENGTH = 18;
+const CRYPTO_INVESTMENT_OPTIONS = [10, 25, 50] as const;
+const CRYPTO_COINS: Array<{
+  id: CryptoCoinId;
+  name: string;
+  shortLabel: string;
+  accent: string;
+  cardTone: string;
+  description: string;
+}> = [
+  { id: "wutax", name: "Wutax Coin", shortLabel: "WTX", accent: "#f97316", cardTone: "from-orange-500/20 to-amber-500/10", description: "Volatile meme-energy momentum with sharp intraday swings." },
+  { id: "galaxy", name: "Galaxy Coin", shortLabel: "GLX", accent: "#60a5fa", cardTone: "from-sky-500/20 to-indigo-500/10", description: "Big-cap social token with steadier orbit-like movement." },
+  { id: "arc", name: "Arc", shortLabel: "ARC", accent: "#f472b6", cardTone: "from-pink-500/20 to-fuchsia-500/10", description: "Fast reaction coin with dramatic sentiment spikes." },
+  { id: "nebula", name: "Nebula Coin", shortLabel: "NEB", accent: "#a78bfa", cardTone: "from-violet-500/20 to-purple-500/10", description: "Cloudy mid-cap asset that drifts before snapping higher or lower." },
+  { id: "spark", name: "Spark", shortLabel: "SPK", accent: "#34d399", cardTone: "from-emerald-500/20 to-teal-500/10", description: "Utility-style coin with smaller but frequent moves." },
 ];
+
+type CryptoMarketState = {
+  lastUpdatedAt: number;
+  coins: Record<CryptoCoinId, { currentValue: number; history: number[] }>;
+};
+
+function createInitialCryptoMarketState(): CryptoMarketState {
+  return {
+    lastUpdatedAt: Date.now(),
+    coins: {
+      wutax: { currentValue: 1.12, history: [0.82, 0.85, 0.9, 0.88, 0.93, 0.95, 0.99, 1.02, 1.05, 1.01, 1.04, 1.08, 1.06, 1.03, 1.07, 1.1, 1.09, 1.12] },
+      galaxy: { currentValue: 2.38, history: [1.74, 1.8, 1.86, 1.9, 1.95, 1.99, 2.03, 2.08, 2.12, 2.1, 2.15, 2.2, 2.24, 2.29, 2.26, 2.31, 2.35, 2.38] },
+      arc: { currentValue: 0.84, history: [0.69, 0.71, 0.74, 0.72, 0.76, 0.78, 0.8, 0.77, 0.81, 0.83, 0.79, 0.82, 0.85, 0.81, 0.8, 0.78, 0.82, 0.84] },
+      nebula: { currentValue: 1.64, history: [1.28, 1.31, 1.35, 1.39, 1.42, 1.45, 1.49, 1.52, 1.56, 1.54, 1.58, 1.61, 1.59, 1.57, 1.6, 1.62, 1.63, 1.64] },
+      spark: { currentValue: 0.52, history: [0.36, 0.38, 0.4, 0.41, 0.43, 0.44, 0.46, 0.45, 0.47, 0.48, 0.49, 0.47, 0.48, 0.5, 0.49, 0.51, 0.5, 0.52] },
+    },
+  };
+}
+
+function getNextCoinValue(value: number) {
+  const delta = 1 + (Math.random() * 0.16 - 0.08);
+  return Math.max(0.1, Number((value * delta).toFixed(2)));
+}
+
+function rollCryptoMarket(previous: CryptoMarketState) {
+  const nextCoins = CRYPTO_COINS.reduce<CryptoMarketState["coins"]>((accumulator, coin) => {
+    const currentCoin = previous.coins[coin.id];
+    const nextValue = getNextCoinValue(currentCoin.currentValue);
+    accumulator[coin.id] = {
+      currentValue: nextValue,
+      history: [...currentCoin.history.slice(-(CRYPTO_HISTORY_LENGTH - 1)), nextValue],
+    };
+    return accumulator;
+  }, {} as CryptoMarketState["coins"]);
+
+  return {
+    lastUpdatedAt: Date.now(),
+    coins: nextCoins,
+  };
+}
+
+function getCryptoMarketState() {
+  const cached = readCache<CryptoMarketState>(CRYPTO_MARKET_KEY);
+  if (!cached) {
+    const initialState = createInitialCryptoMarketState();
+    writeCache(CRYPTO_MARKET_KEY, initialState);
+    return initialState;
+  }
+
+  if (Date.now() - cached.lastUpdatedAt >= CRYPTO_UPDATE_INTERVAL_MS) {
+    const nextState = rollCryptoMarket(cached);
+    writeCache(CRYPTO_MARKET_KEY, nextState);
+    return nextState;
+  }
+
+  return cached;
+}
+
+function applyCryptoTradeImpact(currentMarket: CryptoMarketState, coinId: CryptoCoinId, direction: 1 | -1, volume: number) {
+  const currentCoin = currentMarket.coins[coinId];
+  const impact = Math.min(0.12, Math.max(0.01, volume / 500));
+  const nextValue = Math.max(0.1, Number((currentCoin.currentValue * (1 + direction * impact)).toFixed(2)));
+
+  return {
+    lastUpdatedAt: Date.now(),
+    coins: {
+      ...currentMarket.coins,
+      [coinId]: {
+        currentValue: nextValue,
+        history: [...currentCoin.history.slice(-(CRYPTO_HISTORY_LENGTH - 1)), nextValue],
+      },
+    },
+  } satisfies CryptoMarketState;
+}
 
 export function CryptoPage() {
   const { user } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(users[0]);
-  const [pendingPackId, setPendingPackId] = useState<string | null>(null);
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [market, setMarket] = useState<CryptoMarketState>(() => getCryptoMarketState());
+  const [buyAmounts, setBuyAmounts] = useState<Record<CryptoCoinId, number>>({ wutax: 10, galaxy: 10, arc: 10, nebula: 10, spark: 10 });
+  const [sellAmounts, setSellAmounts] = useState<Record<CryptoCoinId, number>>({ wutax: 0, galaxy: 0, arc: 0, nebula: 0, spark: 0 });
   const gems = profile?.gems ?? 0;
-  const emeralds = profile?.emeralds ?? 0;
+  const holdings = profile?.coinHoldings ?? { wutax: 0, galaxy: 0, arc: 0, nebula: 0, spark: 0 };
+  const isModerator = profile?.isModerator ?? false;
 
   useEffect(() => {
     if (!user) {
@@ -2181,55 +2285,237 @@ export function CryptoPage() {
     return subscribeToUserProfileById(user.uid, setProfile);
   }, [user]);
 
-  const invest = async (pack: (typeof emeraldPacks)[number]) => {
-    if (!user || pendingPackId) {
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      const nextState = rollCryptoMarket(getCryptoMarketState());
+      writeCache(CRYPTO_MARKET_KEY, nextState);
+      setMarket(nextState);
+    }, CRYPTO_UPDATE_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  const invest = async (coinId: CryptoCoinId, gemAmount: number) => {
+    if (!user || pendingActionId) {
       return;
     }
 
-    setPendingPackId(pack.id);
+    setPendingActionId(`${coinId}-${gemAmount}`);
     try {
-      await investGemsInEmeralds(user.uid, pack.gems);
-      toast.success("Emerald investment confirmed", { description: `-${pack.gems} gems, +${pack.gems} emeralds` });
+      await investGemsInCoin(user.uid, coinId, gemAmount);
+      const nextState = applyCryptoTradeImpact(market, coinId, 1, gemAmount);
+      writeCache(CRYPTO_MARKET_KEY, nextState);
+      setMarket(nextState);
+      toast.success("Investment confirmed", { description: `-${gemAmount} gems into ${CRYPTO_COINS.find((coin) => coin.id === coinId)?.name}` });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not invest in emeralds.");
+      toast.error(error instanceof Error ? error.message : "Could not place that investment.");
     } finally {
-      setPendingPackId(null);
+      setPendingActionId(null);
     }
   };
 
+  const sell = async (coinId: CryptoCoinId, coinAmount: number, gemValue: number) => {
+    if (!user || pendingActionId || coinAmount <= 0) {
+      return;
+    }
+
+    setPendingActionId(`${coinId}-sell-${coinAmount}`);
+    try {
+      await sellCoinForGems(user.uid, coinId, coinAmount, gemValue);
+      const nextState = applyCryptoTradeImpact(market, coinId, -1, gemValue);
+      writeCache(CRYPTO_MARKET_KEY, nextState);
+      setMarket(nextState);
+      toast.success("Sale confirmed", { description: `+${gemValue} gems from ${CRYPTO_COINS.find((coin) => coin.id === coinId)?.name}` });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not complete that sale.");
+    } finally {
+      setPendingActionId(null);
+    }
+  };
+
+  const moderateCoin = (coinId: CryptoCoinId, direction: 1 | -1) => {
+    if (!isModerator) {
+      return;
+    }
+
+    const current = market.coins[coinId];
+    const nextValue = Number((current.currentValue * (1 + direction * 0.05)).toFixed(2));
+        const nextState: CryptoMarketState = {
+      lastUpdatedAt: Date.now(),
+      coins: {
+        ...market.coins,
+        [coinId]: {
+          currentValue: nextValue,
+          history: [...current.history.slice(-(CRYPTO_HISTORY_LENGTH - 1)), nextValue],
+        },
+      },
+    };
+
+    writeCache(CRYPTO_MARKET_KEY, nextState);
+    setMarket(nextState);
+  };
+
+  const totalPortfolioValue = CRYPTO_COINS.reduce((sum, coin) => sum + holdings[coin.id] * market.coins[coin.id].currentValue, 0);
+
   return (
-    <PageFrame title="Crypto" subtitle="Invest gems into emeralds and build your on-platform treasury." titleIcon={Gem}>
+    <PageFrame title="Crypto" subtitle="Track the market, move gems in and out, and catch the 10-minute swings." titleIcon={Gem}>
       <div className="space-y-5">
-        <Card className="grid gap-3 p-5 sm:grid-cols-2">
-          <div className="rounded-lg border border-border bg-surfaceAlt px-4 py-3">
+        <Card className="grid gap-3 p-5 sm:grid-cols-3">
+          <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
             <p className="flex items-center gap-2 text-sm text-textMuted"><Gem size={16} /> Available gems</p>
             <p className="mt-1 text-2xl font-bold tabular-nums">{gems}</p>
           </div>
-          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
-            <p className="flex items-center gap-2 text-sm text-emerald-300"><Sparkles size={16} /> Emerald holdings</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums">{emeralds}</p>
+          <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
+            <p className="flex items-center gap-2 text-sm text-textMuted"><Sparkles size={16} /> Coins held</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums">{Object.values(holdings).reduce((sum, amount) => sum + amount, 0)}</p>
+          </div>
+          <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
+            <p className="flex items-center gap-2 text-sm text-textMuted"><Globe2 size={16} /> Portfolio value</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums">{totalPortfolioValue.toFixed(2)}</p>
           </div>
         </Card>
 
-        <div className="grid gap-4 md:grid-cols-3">
-          {emeraldPacks.map((pack) => (
-            <Card key={pack.id} className={`space-y-4 bg-gradient-to-br ${pack.tone} p-5`}>
-              <div>
-                <p className="text-sm font-semibold text-emerald-300">{pack.name}</p>
-                <p className="mt-2 text-3xl font-bold tabular-nums">{pack.gems}</p>
-                <p className="text-sm text-textMuted">gems into {pack.gems} emeralds</p>
-              </div>
-              <Button
-                className="w-full gap-2"
-                variant={gems >= pack.gems ? "primary" : "secondary"}
-                disabled={!user || pendingPackId !== null || gems < pack.gems}
-                onClick={() => void invest(pack)}
-              >
-                <Gem size={16} />
-                {pendingPackId === pack.id ? "Investing..." : gems < pack.gems ? "Need more gems" : "Invest"}
-              </Button>
-            </Card>
-          ))}
+        <div className="space-y-4">
+          {CRYPTO_COINS.map((coin) => {
+            const coinMarket = market.coins[coin.id];
+            const minValue = Math.min(...coinMarket.history);
+            const maxValue = Math.max(...coinMarket.history);
+            const holdingsValue = holdings[coin.id] * coinMarket.currentValue;
+            const chartDelta = ((coinMarket.currentValue - coinMarket.history[0]) / coinMarket.history[0]) * 100;
+            const buyAmount = Math.min(buyAmounts[coin.id], Math.max(gems, 1));
+            const sellAmount = Math.min(sellAmounts[coin.id], holdings[coin.id]);
+            const sellGemValue = Math.max(1, Math.floor(sellAmount * coinMarket.currentValue));
+            const chartStroke = chartDelta >= 0 ? "#4ade80" : "#f87171";
+
+            return (
+              <Card key={coin.id} className="space-y-4 border border-border bg-surface p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: coin.accent }}>{coin.name}</p>
+                    <p className="mt-1 text-xs uppercase tracking-[0.18em] text-textMuted">{coin.shortLabel}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs uppercase tracking-[0.18em] text-textMuted">Value</p>
+                    <p className="mt-1 text-3xl font-bold tabular-nums">{coinMarket.currentValue.toFixed(2)}</p>
+                    <p className={`mt-1 text-xs font-semibold ${chartDelta >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                      {chartDelta >= 0 ? "+" : ""}{chartDelta.toFixed(1)}%
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-border bg-surfaceAlt/45 p-4">
+                  <div className="relative h-28 overflow-hidden rounded-2xl border border-border/70 bg-surface/40 px-3 py-2">
+                    <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,transparent_24%,rgba(255,255,255,0.04)_25%,transparent_26%,transparent_49%,rgba(255,255,255,0.04)_50%,transparent_51%,transparent_74%,rgba(255,255,255,0.04)_75%,transparent_76%)]" />
+                    <div className="flex h-full items-end gap-0">
+                      {coinMarket.history.map((point, index) => {
+                        const previousPoint = coinMarket.history[Math.max(0, index - 1)] ?? point;
+                        const barColor = point >= previousPoint ? "#4ade80" : "#f87171";
+                        const normalizedHeightPx = maxValue === minValue ? 52 : 18 + ((point - minValue) / (maxValue - minValue)) * 58;
+                        const wickHeightPx = Math.min(88, normalizedHeightPx + 10);
+                        return (
+                          <div key={`${coin.id}-${index}`} className="relative flex-1 self-end px-[0.5px]">
+                            <div
+                              className="absolute bottom-0 left-1/2 w-px -translate-x-1/2 rounded-full"
+                              style={{ height: `${wickHeightPx}px`, background: `${barColor}88` }}
+                            />
+                            <div
+                              className="w-full rounded-t-[1px]"
+                              style={{
+                                height: `${normalizedHeightPx}px`,
+                                background: `linear-gradient(180deg, ${barColor}cc 0%, ${barColor} 100%)`,
+                                boxShadow: `0 0 10px ${barColor}33`,
+                              }}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between text-xs text-textMuted">
+                    <span>Updates every 10m</span>
+                    <span>{coinMarket.history.map((point) => point.toFixed(2)).join(" · ")}</span>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl border border-border bg-surfaceAlt/30 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.18em] text-textMuted">Held</p>
+                    <p className="mt-1 text-lg font-semibold tabular-nums">{holdings[coin.id]}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-surfaceAlt/30 px-4 py-3 sm:col-span-2">
+                    <p className="text-xs uppercase tracking-[0.18em] text-textMuted">Current holding value</p>
+                    <p className="mt-1 text-lg font-semibold tabular-nums">{holdingsValue.toFixed(2)}</p>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-2xl border border-border bg-surfaceAlt/30 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold">Buy</p>
+                      <span className="text-sm font-semibold tabular-nums">{buyAmount} gems</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={1}
+                      max={Math.max(gems, 1)}
+                      step={1}
+                      value={buyAmount}
+                      disabled={!user || gems < 1}
+                      onChange={(event) => {
+                        const nextAmount = Number(event.target.value);
+                        setBuyAmounts((current) => ({ ...current, [coin.id]: nextAmount }));
+                      }}
+                      className="mt-4 h-3 w-full cursor-pointer appearance-none rounded-full border border-white/10 bg-surfaceAlt shadow-inner shadow-black/30"
+                      style={{ accentColor: chartStroke }}
+                    />
+                    <Button
+                      className="mt-4 w-full"
+                      disabled={!user || pendingActionId !== null || gems < 1}
+                      onClick={() => void invest(coin.id, buyAmount)}
+                    >
+                      {pendingActionId === `${coin.id}-${buyAmount}` ? "Buying..." : `Buy ${buyAmount}`}
+                    </Button>
+                  </div>
+
+                  <div className="rounded-2xl border border-border bg-surfaceAlt/30 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold">Sell</p>
+                      <span className="text-sm font-semibold tabular-nums">{sellAmount} coins</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(holdings[coin.id], 0)}
+                      step={1}
+                      value={sellAmount}
+                      disabled={!user || holdings[coin.id] < 1}
+                      onChange={(event) => {
+                        const nextAmount = Number(event.target.value);
+                        setSellAmounts((current) => ({ ...current, [coin.id]: nextAmount }));
+                      }}
+                      className="mt-4 h-3 w-full cursor-pointer appearance-none rounded-full border border-white/10 bg-surfaceAlt shadow-inner shadow-black/30"
+                      style={{ accentColor: chartStroke }}
+                    />
+                    <Button
+                      variant="secondary"
+                      className="mt-4 w-full"
+                      disabled={!user || pendingActionId !== null || sellAmount < 1}
+                      onClick={() => void sell(coin.id, sellAmount, sellGemValue)}
+                    >
+                      {pendingActionId === `${coin.id}-sell-${sellAmount}` ? "Selling..." : `Sell ${sellAmount} for ${sellGemValue}`}
+                    </Button>
+                  </div>
+                </div>
+
+                {isModerator ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Button variant="secondary" className="w-full" onClick={() => moderateCoin(coin.id, 1)}>Buff +5%</Button>
+                    <Button variant="secondary" className="w-full" onClick={() => moderateCoin(coin.id, -1)}>Nerf -5%</Button>
+                  </div>
+                ) : null}
+              </Card>
+            );
+          })}
         </div>
       </div>
     </PageFrame>
@@ -2281,7 +2567,7 @@ export function LeaderboardPage() {
                         className="truncate text-left text-lg font-semibold hover:underline"
                         onClick={() => navigate(`/profile/${leader.handle}`)}
                       >
-                        <span style={{ color: getNameColorValue(leader.equippedNameColorId) }}>{leader.displayName}</span>
+                        <span style={getNameColorStyle(leader.equippedNameColorId)}>{leader.displayName}</span>
                       </button>
                     </div>
                     <p className="mt-1 text-sm text-textMuted">@{leader.handle}</p>

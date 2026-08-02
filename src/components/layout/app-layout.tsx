@@ -31,7 +31,7 @@ import { subscribeToFollowCounts } from "@/firebase/follows";
 import { createNotification, subscribeToNotifications } from "@/firebase/notifications";
 import { subscribeToLeaderboardRank } from "@/firebase/posts";
 import { addGemsToUser, addXpToUser } from "@/firebase/users";
-import { getNameColorValue } from "@/constants/name-colors";
+import { getNameColorStyle } from "@/constants/name-colors";
 import { users } from "@/lib/demo-data";
 import { readCache, writeCache } from "@/lib/persistent-cache";
 import { useUiStore } from "@/store/use-ui-store";
@@ -257,7 +257,7 @@ export function AppLayout() {
             <Link to={profilePath} className="flex items-center gap-4 transition hover:opacity-80">
               <Avatar name={profile.displayName} src={profile.photoURL} />
               <div>
-                <p className="font-semibold" style={{ color: getNameColorValue(profile.equippedNameColorId) }}>{profile.displayName}</p>
+                <p className="font-semibold" style={getNameColorStyle(profile.equippedNameColorId)}>{profile.displayName}</p>
                 <p className="text-sm text-textMuted">@{profile.handle}</p>
               </div>
             </Link>

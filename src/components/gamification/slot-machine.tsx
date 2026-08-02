@@ -7,12 +7,12 @@ import { addGemsToUser, subscribeToUserProfileById } from "@/firebase/users";
 import type { UserProfile } from "@/types/models";
 
 const SYMBOLS = [
-  { id: "cherry", glyph: "🍒", weight: 28 },
-  { id: "lemon", glyph: "🍋", weight: 20 },
-  { id: "orange", glyph: "🍊", weight: 18 },
-  { id: "banana", glyph: "🍌", weight: 16 },
-  { id: "slot", glyph: "🎰", weight: 10 },
-  { id: "diamond", glyph: "💎", weight: 8 },
+  { id: "cherry", glyph: "🍒", weight: 24 },
+  { id: "lemon", glyph: "🍋", weight: 18 },
+  { id: "orange", glyph: "🍊", weight: 16 },
+  { id: "banana", glyph: "🍌", weight: 14 },
+  { id: "slot", glyph: "🎰", weight: 7 },
+  { id: "diamond", glyph: "💎", weight: 5 },
 ] as const;
 
 type SymbolId = (typeof SYMBOLS)[number]["id"];
@@ -44,25 +44,25 @@ function evaluateSpin(reels: SymbolId[]) {
   const tripleFruit = fruitIds.some((symbolId) => counts[symbolId] === 3);
   const doubleFruit = fruitIds.some((symbolId) => counts[symbolId] === 2);
 
-  if (counts.diamond === 3) return { label: "Triple diamonds", multiplier: 10 };
-  if (counts.slot === 3) return { label: "Triple slots", multiplier: 8 };
-  if ((counts.slot ?? 0) === 2) return { label: "Double slots", multiplier: 6 };
-  if (counts.cherry === 3) return { label: "Triple cherries", multiplier: 5 };
-  if (tripleFruit) return { label: "Triple fruit", multiplier: 3 };
-  if ((counts.cherry ?? 0) === 2) return { label: "Double cherries", multiplier: 2 };
-  if (doubleFruit) return { label: "Double fruit", multiplier: 1.5 };
+  if (counts.diamond === 3) return { label: "Triple diamonds", multiplier: 8 };
+  if (counts.slot === 3) return { label: "Triple slots", multiplier: 6 };
+  if ((counts.slot ?? 0) === 2) return { label: "Double slots", multiplier: 4 };
+  if (counts.cherry === 3) return { label: "Triple cherries", multiplier: 4 };
+  if (tripleFruit) return { label: "Triple fruit", multiplier: 2.5 };
+  if ((counts.cherry ?? 0) === 2) return { label: "Double cherries", multiplier: 1.6 };
+  if (doubleFruit) return { label: "Double fruit", multiplier: 1.2 };
 
   return null;
 }
 
 const PAYOUT_ROWS = [
-  { icon: Citrus, label: "2 fruit", value: "1.5x" },
-  { icon: Cherry, label: "2 cherries", value: "2x" },
-  { icon: Citrus, label: "3 fruit", value: "3x" },
-  { icon: Cherry, label: "3 cherries", value: "5x" },
-  { icon: Sparkles, label: "2 slots", value: "6x" },
-  { icon: Sparkles, label: "3 slots", value: "8x" },
-  { icon: Diamond, label: "3 diamonds", value: "10x" },
+  { icon: Citrus, label: "2 fruit", value: "1.2x" },
+  { icon: Cherry, label: "2 cherries", value: "1.6x" },
+  { icon: Citrus, label: "3 fruit", value: "2.5x" },
+  { icon: Cherry, label: "3 cherries", value: "4x" },
+  { icon: Sparkles, label: "2 slots", value: "4x" },
+  { icon: Sparkles, label: "3 slots", value: "6x" },
+  { icon: Diamond, label: "3 diamonds", value: "8x" },
 ] as const;
 
 export function SlotMachine() {

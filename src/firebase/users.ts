@@ -4,7 +4,7 @@ import { db } from "@/firebase/config";
 import { COLLECTIONS } from "@/firebase/firestore";
 import { createNotification } from "@/firebase/notifications";
 import { getLevelForXp } from "@/constants/gamification";
-import type { ThemeMode, UserProfile } from "@/types/models";
+import type { CryptoCoinId, ThemeMode, UserProfile } from "@/types/models";
 import { users as demoUsers } from "@/lib/demo-data";
 import { bannerPresets } from "@/lib/banner-presets";
 import { readCache, writeCache } from "@/lib/persistent-cache";
@@ -63,7 +63,13 @@ export async function ensureUserProfile(user: User) {
     theme: "graphite" as ThemeMode,
     accentColor: "#ff6b57",
     gems: 0,
-    emeralds: 0,
+    coinHoldings: {
+      wutax: 0,
+      galaxy: 0,
+      arc: 0,
+      nebula: 0,
+      spark: 0,
+    },
     casinoCoins: 0,
     ownedNameColorIds: ["default"],
     ownedThemeIds: ["graphite", "mist"],
@@ -174,7 +180,7 @@ export async function buyCasinoCoin(userId: string) {
   });
 }
 
-export async function investGemsInEmeralds(userId: string, gemCost: number) {
+export async function investGemsInCoin(userId: string, coinId: CryptoCoinId, gemCost: number) {
   const ref = doc(db, COLLECTIONS.users, userId);
 
   await runTransaction(db, async (transaction) => {
@@ -186,12 +192,50 @@ export async function investGemsInEmeralds(userId: string, gemCost: number) {
 
     const currentGems = Number(snapshot.data().gems ?? 0);
     if (currentGems < gemCost) {
-      throw new Error(`You need ${gemCost} gems to invest in emeralds.`);
+      throw new Error(`You need ${gemCost} gems to invest in ${coinId} coin.`);
     }
+
+    const currentHoldings = (snapshot.data().coinHoldings ?? {}) as Partial<Record<CryptoCoinId, number>>;
 
     transaction.update(ref, {
       gems: currentGems - gemCost,
-      emeralds: Number(snapshot.data().emeralds ?? 0) + gemCost,
+      coinHoldings: {
+        wutax: Number(currentHoldings.wutax ?? 0) + (coinId === "wutax" ? gemCost : 0),
+        galaxy: Number(currentHoldings.galaxy ?? 0) + (coinId === "galaxy" ? gemCost : 0),
+        arc: Number(currentHoldings.arc ?? 0) + (coinId === "arc" ? gemCost : 0),
+        nebula: Number(currentHoldings.nebula ?? 0) + (coinId === "nebula" ? gemCost : 0),
+        spark: Number(currentHoldings.spark ?? 0) + (coinId === "spark" ? gemCost : 0),
+      },
+      updatedAt: serverTimestamp(),
+    });
+  });
+}
+
+export async function sellCoinForGems(userId: string, coinId: CryptoCoinId, coinAmount: number, gemValue: number) {
+  const ref = doc(db, COLLECTIONS.users, userId);
+
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+
+    if (!snapshot.exists()) {
+      return;
+    }
+
+    const currentHoldings = (snapshot.data().coinHoldings ?? {}) as Partial<Record<CryptoCoinId, number>>;
+    const currentCoinAmount = Number(currentHoldings[coinId] ?? 0);
+    if (currentCoinAmount < coinAmount) {
+      throw new Error(`You only have ${currentCoinAmount} ${coinId} to sell.`);
+    }
+
+    transaction.update(ref, {
+      gems: Number(snapshot.data().gems ?? 0) + gemValue,
+      coinHoldings: {
+        wutax: Number(currentHoldings.wutax ?? 0) - (coinId === "wutax" ? coinAmount : 0),
+        galaxy: Number(currentHoldings.galaxy ?? 0) - (coinId === "galaxy" ? coinAmount : 0),
+        arc: Number(currentHoldings.arc ?? 0) - (coinId === "arc" ? coinAmount : 0),
+        nebula: Number(currentHoldings.nebula ?? 0) - (coinId === "nebula" ? coinAmount : 0),
+        spark: Number(currentHoldings.spark ?? 0) - (coinId === "spark" ? coinAmount : 0),
+      },
       updatedAt: serverTimestamp(),
     });
   });

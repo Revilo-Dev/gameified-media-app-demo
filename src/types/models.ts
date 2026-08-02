@@ -5,9 +5,13 @@ export type ThemeMode =
   | "aurora"
   | "nordic"
   | "synthwave"
-  | "solarizedLight";
+  | "solarizedLight"
+  | "midnightRose"
+  | "lagoon"
+  | "sunsetClub";
 
 export type BadgeRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
+export type CryptoCoinId = "wutax" | "galaxy" | "arc" | "nebula" | "spark";
 
 export type TimelineTab = "for-you" | "following";
 
@@ -45,7 +49,7 @@ export interface UserProfile {
   theme: ThemeMode;
   accentColor: string;
   gems: number;
-  emeralds: number;
+  coinHoldings: Record<CryptoCoinId, number>;
   casinoCoins: number;
   ownedNameColorIds: string[];
   ownedThemeIds: ThemeMode[];
@@ -134,6 +138,8 @@ export interface NameColorOption {
   price: number;
   rarity: BadgeRarity;
   description: string;
+  animated?: boolean;
+  gradient?: string;
 }
 
 export interface TriviaQuestion {

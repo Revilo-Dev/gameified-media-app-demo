@@ -3,7 +3,7 @@ import { Coins } from "lucide-react";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { useAuth } from "@/app/auth-provider";
-import { addGemsToUser, subscribeToUserProfileById } from "@/firebase/users";
+import { addGamblingResult, addGemsToUser, addXpToUser, subscribeToUserProfileById } from "@/firebase/users";
 import type { UserProfile } from "@/types/models";
 
 type CoinSide = "heads" | "tails";
@@ -49,6 +49,7 @@ export function CoinToss() {
     setIsFlipping(true);
     setLandedSide(null);
     await addGemsToUser(user.uid, -wager);
+    await addGamblingResult(user.uid, "loss", wager);
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     const result: CoinSide = Math.random() >= 0.5 ? "heads" : "tails";
@@ -57,6 +58,8 @@ export function CoinToss() {
     if (result === pickedSide) {
       const payout = Math.floor(wager * 1.5);
       await addGemsToUser(user.uid, payout);
+      await addGamblingResult(user.uid, "gain", payout);
+      await addXpToUser(user.uid, Math.max(5, Math.floor(payout / 3)));
     }
 
     setIsFlipping(false);

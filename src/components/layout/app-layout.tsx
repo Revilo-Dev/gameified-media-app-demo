@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import {
   Bell,
   Bookmark,
+  ChevronDown,
+  ChevronUp,
   Crown,
   Gem,
   Gamepad2,
+  Hammer,
   Home,
   LayoutGrid,
   Menu,
@@ -30,6 +33,7 @@ import { COLLECTIONS } from "@/firebase/firestore";
 import { subscribeToFollowCounts } from "@/firebase/follows";
 import { createNotification, subscribeToNotifications } from "@/firebase/notifications";
 import { subscribeToLeaderboardRank } from "@/firebase/posts";
+import { resetAllCrypto, resetAllGems } from "@/firebase/functions";
 import { addGemsToUser, addXpToUser } from "@/firebase/users";
 import { getNameColorStyle } from "@/constants/name-colors";
 import { users } from "@/lib/demo-data";
@@ -80,6 +84,8 @@ export function AppLayout() {
   const [notificationCount, setNotificationCount] = useState(0);
   const [claimedToday, setClaimedToday] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isModeratorPanelOpen, setIsModeratorPanelOpen] = useState(false);
+  const [isModeratorResetOpen, setIsModeratorResetOpen] = useState(false);
   const [displayedGems, setDisplayedGems] = useState(users[0].gems);
   const [gemDelta, setGemDelta] = useState(0);
   const [gemFlash, setGemFlash] = useState<"gain" | "spend" | null>(null);
@@ -312,13 +318,67 @@ export function AppLayout() {
             </NavLink>
             {profile.isModerator ? (
               <div className="space-y-2 rounded-2xl border border-border bg-surfaceAlt/50 p-4">
-                <p className="text-sm font-semibold">Moderator cheats</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button type="button" variant="secondary" onClick={() => void addXpToUser(profile.uid, 50)}>+50 XP</Button>
-                  <Button type="button" variant="secondary" onClick={() => void addGemsToUser(profile.uid, 50)}>+50 gems</Button>
-                  <Button type="button" variant="secondary" onClick={() => void addXpToUser(profile.uid, -profile.xp)}>Reset level</Button>
-                  <Button type="button" variant="secondary" onClick={() => void addGemsToUser(profile.uid, -profile.gems)}>Reset gems</Button>
-                </div>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between text-left"
+                  onClick={() => setIsModeratorPanelOpen((current) => !current)}
+                >
+                  <span className="inline-flex items-center gap-2 text-sm font-semibold">
+                    <Hammer size={16} />
+                    Moderator panel
+                  </span>
+                  {isModeratorPanelOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </button>
+                {isModeratorPanelOpen ? (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button type="button" variant="secondary" onClick={() => void addXpToUser(profile.uid, 50)}>+50 XP</Button>
+                      <Button type="button" variant="secondary" onClick={() => void addGemsToUser(profile.uid, 50)}>+50 gems</Button>
+                      <Button type="button" variant="secondary" onClick={() => void addXpToUser(profile.uid, -profile.xp)}>Reset level</Button>
+                      <Button type="button" variant="secondary" onClick={() => void addGemsToUser(profile.uid, -profile.gems)}>Reset gems</Button>
+                    </div>
+                    <div className="rounded-2xl border border-border bg-surface/60 p-3">
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between text-left text-sm font-semibold"
+                        onClick={() => setIsModeratorResetOpen((current) => !current)}
+                      >
+                        <span>Global resets</span>
+                        {isModeratorResetOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      </button>
+                      {isModeratorResetOpen ? (
+                        <div className="mt-3 grid gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={async () => {
+                              if (!window.confirm("Reset every user's gems to 500?")) {
+                                return;
+                              }
+                              await resetAllGems();
+                              toast.success("All gems reset to 500");
+                            }}
+                          >
+                            Reset all gems to 500
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={async () => {
+                              if (!window.confirm("Reset all crypto holdings?")) {
+                                return;
+                              }
+                              await resetAllCrypto();
+                              toast.success("All crypto reset");
+                            }}
+                          >
+                            Reset all crypto
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
             <Button variant="ghost" className="w-full border border-[color:var(--error)] text-[color:var(--error)]" onClick={async () => {

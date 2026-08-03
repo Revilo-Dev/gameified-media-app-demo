@@ -119,7 +119,7 @@ type CreatePostInput = Omit<
 };
 
 export async function createPost(input: CreatePostInput) {
-  return addDoc(collection(db, COLLECTIONS.posts), {
+  const createdPost = await addDoc(collection(db, COLLECTIONS.posts), {
     ...input,
     gifURL: input.gifURL ?? null,
     imageURL: input.imageURL ?? null,
@@ -138,6 +138,13 @@ export async function createPost(input: CreatePostInput) {
     rottenTomatoCount: input.rottenTomatoCount ?? 0,
     createdAt: serverTimestamp(),
   });
+
+  await updateDoc(doc(db, COLLECTIONS.users, input.authorId), {
+    postCount: increment(1),
+    updatedAt: serverTimestamp(),
+  });
+
+  return createdPost;
 }
 
 function reactionDocId(postId: string, userId: string, type: "star" | "rotten") {
@@ -248,6 +255,7 @@ export async function softDeletePost(postId: string) {
   }
 
   const data = snapshot.data();
+  const authorId = String(data.authorId ?? "");
   const parentPostId = typeof data.parentPostId === "string" ? data.parentPostId : null;
   const replyToPostId = typeof data.replyToPostId === "string" ? data.replyToPostId : null;
   const imageStoragePath = typeof data.imageStoragePath === "string" ? data.imageStoragePath : null;
@@ -262,6 +270,13 @@ export async function softDeletePost(postId: string) {
     updatedAt: serverTimestamp(),
   });
   await deleteStorageObject(imageStoragePath);
+
+  if (authorId) {
+    await updateDoc(doc(db, COLLECTIONS.users, authorId), {
+      postCount: increment(-1),
+      updatedAt: serverTimestamp(),
+    });
+  }
 
   if (parentPostId) {
     await updateDoc(doc(db, COLLECTIONS.posts, parentPostId), { replyCount: increment(-1) });
@@ -421,6 +436,7 @@ export async function deletePostCascade(postId: string) {
   }
 
   const data = snapshot.data();
+  const authorId = String(data.authorId ?? "");
   const parentPostId = typeof data.parentPostId === "string" ? data.parentPostId : null;
   const replyToPostId = typeof data.replyToPostId === "string" ? data.replyToPostId : null;
   const imageStoragePath = typeof data.imageStoragePath === "string" ? data.imageStoragePath : null;
@@ -435,6 +451,13 @@ export async function deletePostCascade(postId: string) {
   await deletePostArtifacts(postId);
   await deleteDoc(postRef);
   await deleteStorageObject(imageStoragePath);
+
+  if (authorId) {
+    await updateDoc(doc(db, COLLECTIONS.users, authorId), {
+      postCount: increment(-1),
+      updatedAt: serverTimestamp(),
+    });
+  }
 
   if (parentPostId) {
     await updateDoc(doc(db, COLLECTIONS.posts, parentPostId), { replyCount: increment(-1) });

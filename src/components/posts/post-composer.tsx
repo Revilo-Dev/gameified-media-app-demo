@@ -271,7 +271,12 @@ export function PostComposer({
     <Card className={shellClassName}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
         <div className="flex items-start gap-3">
-          <Avatar name={profile?.displayName ?? user?.displayName ?? "Guest"} src={profile?.photoURL ?? null} className="h-10 w-10 rounded-2xl" />
+          <Avatar
+            name={profile?.displayName ?? user?.displayName ?? "Guest"}
+            src={profile?.photoURL ?? null}
+            className="h-10 w-10 rounded-2xl"
+            borderId={profile?.equippedProfileBorderId}
+          />
           <div className="min-w-0 flex-1">
             <div className="mb-2 flex items-center gap-2">
               <p className="text-sm font-semibold">{profile?.displayName ?? user?.displayName ?? "Guest"}</p>

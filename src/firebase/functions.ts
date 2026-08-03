@@ -7,6 +7,8 @@ export const functionNames = {
   reserveHandle: "reserveHandle",
   banUserAccount: "banUserAccount",
   deletePostCascade: "deletePostCascade",
+  resetAllGems: "resetAllGems",
+  resetAllCrypto: "resetAllCrypto",
 } as const;
 
 export async function banUserAccount(targetUserId: string) {
@@ -18,5 +20,17 @@ export async function banUserAccount(targetUserId: string) {
 export async function deletePostCascade(postId: string) {
   const callable = httpsCallable<{ postId: string }, { ok: boolean }>(functions, functionNames.deletePostCascade);
   const result = await callable({ postId });
+  return result.data;
+}
+
+export async function resetAllGems() {
+  const callable = httpsCallable<undefined, { ok: boolean }>(functions, functionNames.resetAllGems);
+  const result = await callable();
+  return result.data;
+}
+
+export async function resetAllCrypto() {
+  const callable = httpsCallable<undefined, { ok: boolean }>(functions, functionNames.resetAllCrypto);
+  const result = await callable();
   return result.data;
 }

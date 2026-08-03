@@ -13,6 +13,26 @@ function buildHandle(displayName: string, uid: string) {
   return displayName.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 18) || `user${uid.slice(0, 6)}`;
 }
 
+function normalizeCoinHoldings(holdings: Partial<Record<CryptoCoinId, number>> | undefined) {
+  return {
+    wutax: Number(holdings?.wutax ?? 0),
+    galaxy: Number(holdings?.galaxy ?? 0),
+    arc: Number(holdings?.arc ?? 0),
+    nebula: Number(holdings?.nebula ?? 0),
+    spark: Number(holdings?.spark ?? 0),
+  } satisfies Record<CryptoCoinId, number>;
+}
+
+function normalizeCoinInvestmentTotals(totals: Partial<Record<CryptoCoinId, number>> | undefined) {
+  return {
+    wutax: Number(totals?.wutax ?? 0),
+    galaxy: Number(totals?.galaxy ?? 0),
+    arc: Number(totals?.arc ?? 0),
+    nebula: Number(totals?.nebula ?? 0),
+    spark: Number(totals?.spark ?? 0),
+  } satisfies Record<CryptoCoinId, number>;
+}
+
 async function createUniqueHandle(baseHandle: string, currentUserId?: string) {
   const safeBase = baseHandle.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "").slice(0, 20) || `user${(currentUserId ?? "guest").slice(0, 6)}`;
   let candidate = safeBase;
@@ -63,22 +83,22 @@ export async function ensureUserProfile(user: User) {
     theme: "graphite" as ThemeMode,
     accentColor: "#ff6b57",
     gems: 0,
-    coinHoldings: {
-      wutax: 0,
-      galaxy: 0,
-      arc: 0,
-      nebula: 0,
-      spark: 0,
-    },
+    coinHoldings: normalizeCoinHoldings(undefined),
+    coinInvestmentTotals: normalizeCoinInvestmentTotals(undefined),
     casinoCoins: 0,
+    gamblingGains: 0,
+    gamblingLosses: 0,
     ownedNameColorIds: ["default"],
     ownedThemeIds: ["graphite", "mist"],
     equippedNameColorId: "default",
+    ownedProfileBorderIds: ["border-none"],
+    equippedProfileBorderId: "border-none",
     followerCount: 0,
     followingCount: 0,
     postCount: 0,
     badgeCount: 0,
     joinedAt: new Date().toISOString(),
+    lastOnlineAt: new Date().toISOString(),
   };
 
   await setDoc(ref, {
@@ -157,6 +177,25 @@ export async function addGemsToUser(userId: string, gemDelta: number) {
   });
 }
 
+export async function addGamblingResult(userId: string, type: "gain" | "loss", amount: number) {
+  const ref = doc(db, COLLECTIONS.users, userId);
+
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+
+    if (!snapshot.exists()) {
+      return;
+    }
+
+    const safeAmount = Math.max(0, Math.floor(amount));
+    transaction.update(ref, {
+      gamblingGains: Number(snapshot.data().gamblingGains ?? 0) + (type === "gain" ? safeAmount : 0),
+      gamblingLosses: Number(snapshot.data().gamblingLosses ?? 0) + (type === "loss" ? safeAmount : 0),
+      updatedAt: serverTimestamp(),
+    });
+  });
+}
+
 export async function buyCasinoCoin(userId: string) {
   const ref = doc(db, COLLECTIONS.users, userId);
 
@@ -180,7 +219,7 @@ export async function buyCasinoCoin(userId: string) {
   });
 }
 
-export async function investGemsInCoin(userId: string, coinId: CryptoCoinId, gemCost: number) {
+export async function investGemsInCoin(userId: string, coinId: CryptoCoinId, gemCost: number, coinAmount: number) {
   const ref = doc(db, COLLECTIONS.users, userId);
 
   await runTransaction(db, async (transaction) => {
@@ -190,21 +229,29 @@ export async function investGemsInCoin(userId: string, coinId: CryptoCoinId, gem
       return;
     }
 
+    const safeGemCost = Math.max(1, Math.floor(gemCost));
+    const safeCoinAmount = Number(coinAmount.toFixed(6));
     const currentGems = Number(snapshot.data().gems ?? 0);
-    if (currentGems < gemCost) {
-      throw new Error(`You need ${gemCost} gems to invest in ${coinId} coin.`);
+    if (currentGems < safeGemCost) {
+      throw new Error(`You need ${safeGemCost} gems to invest in ${coinId} coin.`);
     }
 
-    const currentHoldings = (snapshot.data().coinHoldings ?? {}) as Partial<Record<CryptoCoinId, number>>;
+    if (safeCoinAmount <= 0) {
+      throw new Error("That purchase does not convert into any coin.");
+    }
+
+    const currentHoldings = normalizeCoinHoldings((snapshot.data().coinHoldings ?? {}) as Partial<Record<CryptoCoinId, number>>);
+    const currentInvestmentTotals = normalizeCoinInvestmentTotals((snapshot.data().coinInvestmentTotals ?? {}) as Partial<Record<CryptoCoinId, number>>);
 
     transaction.update(ref, {
-      gems: currentGems - gemCost,
+      gems: currentGems - safeGemCost,
       coinHoldings: {
-        wutax: Number(currentHoldings.wutax ?? 0) + (coinId === "wutax" ? gemCost : 0),
-        galaxy: Number(currentHoldings.galaxy ?? 0) + (coinId === "galaxy" ? gemCost : 0),
-        arc: Number(currentHoldings.arc ?? 0) + (coinId === "arc" ? gemCost : 0),
-        nebula: Number(currentHoldings.nebula ?? 0) + (coinId === "nebula" ? gemCost : 0),
-        spark: Number(currentHoldings.spark ?? 0) + (coinId === "spark" ? gemCost : 0),
+        ...currentHoldings,
+        [coinId]: Number((currentHoldings[coinId] + safeCoinAmount).toFixed(6)),
+      },
+      coinInvestmentTotals: {
+        ...currentInvestmentTotals,
+        [coinId]: Number((currentInvestmentTotals[coinId] + safeGemCost).toFixed(6)),
       },
       updatedAt: serverTimestamp(),
     });
@@ -213,6 +260,7 @@ export async function investGemsInCoin(userId: string, coinId: CryptoCoinId, gem
 
 export async function sellCoinForGems(userId: string, coinId: CryptoCoinId, coinAmount: number, gemValue: number) {
   const ref = doc(db, COLLECTIONS.users, userId);
+  let profit = 0;
 
   await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(ref);
@@ -221,24 +269,31 @@ export async function sellCoinForGems(userId: string, coinId: CryptoCoinId, coin
       return;
     }
 
-    const currentHoldings = (snapshot.data().coinHoldings ?? {}) as Partial<Record<CryptoCoinId, number>>;
+    const currentHoldings = normalizeCoinHoldings((snapshot.data().coinHoldings ?? {}) as Partial<Record<CryptoCoinId, number>>);
+    const currentInvestmentTotals = normalizeCoinInvestmentTotals((snapshot.data().coinInvestmentTotals ?? {}) as Partial<Record<CryptoCoinId, number>>);
     const currentCoinAmount = Number(currentHoldings[coinId] ?? 0);
     if (currentCoinAmount < coinAmount) {
       throw new Error(`You only have ${currentCoinAmount} ${coinId} to sell.`);
     }
+    const currentInvestment = Number(currentInvestmentTotals[coinId] ?? 0);
+    const soldCostBasis = currentCoinAmount <= 0 ? 0 : Number(((currentInvestment / currentCoinAmount) * coinAmount).toFixed(6));
+    profit = Math.max(0, gemValue - soldCostBasis);
 
     transaction.update(ref, {
       gems: Number(snapshot.data().gems ?? 0) + gemValue,
       coinHoldings: {
-        wutax: Number(currentHoldings.wutax ?? 0) - (coinId === "wutax" ? coinAmount : 0),
-        galaxy: Number(currentHoldings.galaxy ?? 0) - (coinId === "galaxy" ? coinAmount : 0),
-        arc: Number(currentHoldings.arc ?? 0) - (coinId === "arc" ? coinAmount : 0),
-        nebula: Number(currentHoldings.nebula ?? 0) - (coinId === "nebula" ? coinAmount : 0),
-        spark: Number(currentHoldings.spark ?? 0) - (coinId === "spark" ? coinAmount : 0),
+        ...currentHoldings,
+        [coinId]: Number(Math.max(0, currentCoinAmount - coinAmount).toFixed(6)),
+      },
+      coinInvestmentTotals: {
+        ...currentInvestmentTotals,
+        [coinId]: Number(Math.max(0, currentInvestment - soldCostBasis).toFixed(6)),
       },
       updatedAt: serverTimestamp(),
     });
   });
+
+  return { profit };
 }
 
 export async function spendCasinoCoin(userId: string) {
@@ -263,6 +318,13 @@ export async function spendCasinoCoin(userId: string) {
   });
 }
 
+export async function touchUserLastOnline(userId: string) {
+  await updateDoc(doc(db, COLLECTIONS.users, userId), {
+    lastOnlineAt: new Date().toISOString(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export function subscribeToXpLeaderboard(onChange: (users: UserProfile[]) => void): Unsubscribe {
   const leaderboardQuery = query(collection(db, COLLECTIONS.users), orderBy("level", "desc"), limit(50));
 
@@ -274,6 +336,22 @@ export function subscribeToXpLeaderboard(onChange: (users: UserProfile[]) => voi
           uid: document.id,
         }))
         .sort((left, right) => right.level - left.level)
+        .slice(0, 20),
+    );
+  });
+}
+
+export function subscribeToUserLeaderboard(field: "level" | "gems" | "postCount", onChange: (users: UserProfile[]) => void): Unsubscribe {
+  const leaderboardQuery = query(collection(db, COLLECTIONS.users), orderBy(field, "desc"), limit(50));
+
+  return onSnapshot(leaderboardQuery, (snapshot) => {
+    onChange(
+      snapshot.docs
+        .map((document) => ({
+          ...(document.data() as UserProfile),
+          uid: document.id,
+        }))
+        .sort((left, right) => Number(right[field] ?? 0) - Number(left[field] ?? 0))
         .slice(0, 20),
     );
   });

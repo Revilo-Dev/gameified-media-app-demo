@@ -8,7 +8,12 @@ export type ThemeMode =
   | "solarizedLight"
   | "midnightRose"
   | "lagoon"
-  | "sunsetClub";
+  | "sunsetClub"
+  | "citrusPunch"
+  | "polarNight"
+  | "roseQuartz"
+  | "acidWash"
+  | "emberDusk";
 
 export type BadgeRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
 export type CryptoCoinId = "wutax" | "galaxy" | "arc" | "nebula" | "spark";
@@ -50,15 +55,21 @@ export interface UserProfile {
   accentColor: string;
   gems: number;
   coinHoldings: Record<CryptoCoinId, number>;
+  coinInvestmentTotals: Record<CryptoCoinId, number>;
   casinoCoins: number;
+  gamblingGains: number;
+  gamblingLosses: number;
   ownedNameColorIds: string[];
   ownedThemeIds: ThemeMode[];
   equippedNameColorId: string | null;
+  ownedProfileBorderIds: string[];
+  equippedProfileBorderId: string | null;
   followerCount: number;
   followingCount: number;
   postCount: number;
   badgeCount: number;
   joinedAt: string;
+  lastOnlineAt?: string;
 }
 
 export interface Post {
@@ -140,6 +151,16 @@ export interface NameColorOption {
   description: string;
   animated?: boolean;
   gradient?: string;
+}
+
+export interface ProfileBorderOption {
+  id: string;
+  name: string;
+  price: number;
+  rarity: BadgeRarity;
+  description: string;
+  preview: string;
+  animated?: boolean;
 }
 
 export interface TriviaQuestion {

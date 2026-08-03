@@ -185,7 +185,12 @@ export function PostCard({
   return (
     <Card className="relative p-3 sm:p-4">
       <div className="flex gap-3">
-        <Avatar name={author?.displayName ?? "Unknown"} src={author?.photoURL ?? null} className="h-10 w-10 rounded-2xl" />
+        <Avatar
+          name={author?.displayName ?? "Unknown"}
+          src={author?.photoURL ?? null}
+          className="h-10 w-10 rounded-2xl"
+          borderId={author?.equippedProfileBorderId}
+        />
         <div className="min-w-0 flex-1 space-y-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -318,7 +323,11 @@ export function PostCard({
             </div>
           </div>
 
-          <button type="button" className="block w-full text-left" onClick={() => navigate(`/post/${post.id}`)}>
+          <button
+            type="button"
+            className="block w-full text-left"
+            onClick={() => navigate(`/post/${post.parentPostId ?? post.id}`)}
+          >
             <p className="text-sm leading-6 text-text">
               <InlineEntities text={post.content} />
             </p>

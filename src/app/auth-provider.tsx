@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useState, type PropsWithChildren } from "react";
 import type { User } from "firebase/auth";
 import { subscribeToAuthState } from "@/firebase/session";
-import { ensureUserProfile } from "@/firebase/users";
-import { clearCache, readCache, writeCache } from "@/lib/persistent-cache";
+import { ensureUserProfile, touchUserLastOnline } from "@/firebase/users";
+import { clearCache, clearLegacyAppCookies, readCache, writeCache } from "@/lib/persistent-cache";
 
 interface AuthContextValue {
   user: User | null;
@@ -16,6 +16,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [isLoading, setIsLoading] = useState(() => !readCache<User | null>("auth:user"));
 
   useEffect(() => {
+    clearLegacyAppCookies();
+
     return subscribeToAuthState(async (nextUser) => {
       setUser(nextUser);
       setIsLoading(false);
@@ -27,7 +29,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
       }
 
       if (nextUser) {
-        await ensureUserProfile(nextUser);
+        try {
+          await ensureUserProfile(nextUser);
+          await touchUserLastOnline(nextUser.uid);
+        } catch (error) {
+          console.error("Failed to ensure user profile after auth state change", error);
+        }
       }
     });
   }, []);

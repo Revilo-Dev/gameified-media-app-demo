@@ -39,13 +39,13 @@ export function HomePage() {
 
   return (
     <div className="space-y-5">
-      <Card className="sticky top-0 z-10 border-0 bg-canvas/85 p-3 shadow-none backdrop-blur md:border md:border-border/60 md:shadow-panel">
+      <Card className="sticky top-0 z-10 border-0 bg-canvas p-3 shadow-none md:border md:border-border md:shadow-panel">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h1 className="text-lg font-semibold">Home</h1>
 
           </div>
-          <div className="flex items-center rounded-full bg-surfaceAlt/90 p-1 shadow-sm">
+          <div className="flex items-center rounded-full bg-surfaceAlt p-1 shadow-sm">
             <button
               className={`rounded-full px-4 py-2 text-sm transition ${timelineTab === "for-you" ? "bg-[color:var(--accent)] text-white shadow-sm" : "text-textMuted"}`}
               onClick={() => setTimelineTab("for-you")}

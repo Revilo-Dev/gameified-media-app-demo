@@ -3,7 +3,7 @@ import { Cherry, Citrus, Diamond, Sparkles } from "lucide-react";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { useAuth } from "@/app/auth-provider";
-import { addGemsToUser, subscribeToUserProfileById } from "@/firebase/users";
+import { addGamblingResult, addGemsToUser, addXpToUser, subscribeToUserProfileById } from "@/firebase/users";
 import type { UserProfile } from "@/types/models";
 
 const SYMBOLS = [
@@ -95,6 +95,7 @@ export function SlotMachine() {
     setIsSpinning(true);
     setLastResult(null);
     await addGemsToUser(user.uid, -wager);
+    await addGamblingResult(user.uid, "loss", wager);
 
     for (let index = 0; index < 16; index += 1) {
       await new Promise((resolve) => setTimeout(resolve, 55));
@@ -109,6 +110,8 @@ export function SlotMachine() {
     if (win) {
       const payout = Math.floor(wager * win.multiplier);
       await addGemsToUser(user.uid, payout);
+      await addGamblingResult(user.uid, "gain", payout);
+      await addXpToUser(user.uid, Math.max(10, Math.floor(payout / 4)));
       setLastResult({ payout, multiplier: win.multiplier, label: win.label });
     }
 

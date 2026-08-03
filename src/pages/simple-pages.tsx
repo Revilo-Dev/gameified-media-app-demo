@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Bell, Crown, Gem, Globe2, Hammer, ImagePlus, Lock, MapPin, MessageCircle, Palette, Search, Send, Sparkles, Star, Trash2, TriangleAlert, Unlock, UserPlus } from "lucide-react";
+import { Bell, ChevronDown, ChevronUp, CircleDollarSign, Clock3, Crown, Gem, Globe2, Hammer, ImagePlus, Lock, MapPin, MessageCircle, Palette, Search, Send, Sparkles, Star, Trash2, TriangleAlert, Unlock, UserPlus } from "lucide-react";
 import { deleteDoc, doc, increment, updateDoc } from "firebase/firestore";
 import { auth, db } from "@/firebase/config";
 import { Card } from "@/components/common/card";
@@ -18,7 +18,7 @@ import { conversations, messages, shopItems, users } from "@/lib/demo-data";
 import { bannerPresets } from "@/lib/banner-presets";
 import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/auth";
 import { useAuth } from "@/app/auth-provider";
-import { addGemsToUser, addXpToUser, ensureUserProfile, getDemoUserByHandle, investGemsInCoin, isHandleAvailable, sellCoinForGems, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToUserProfiles, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
+import { addGemsToUser, addXpToUser, ensureUserProfile, getDemoUserByHandle, investGemsInCoin, isHandleAvailable, sellCoinForGems, subscribeToUserLeaderboard, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToUserProfiles, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
 import { changeUserPassword, linkGoogleAccount, updateDisplayName, uploadProfileBanner, uploadProfilePicture } from "@/firebase/auth";
 import { deletePostCascade, subscribeToPosts, subscribeToPostsByAuthor } from "@/firebase/posts";
 import { InlineEntities } from "@/components/common/inline-entities";
@@ -27,9 +27,10 @@ import { setFollowingRelationship, subscribeToFollowerIds, subscribeToFollowCoun
 import { useUiStore } from "@/store/use-ui-store";
 import { getXpProgress } from "@/constants/gamification";
 import { getNameColorStyle, getNameColorValue, NAME_COLOR_OPTIONS } from "@/constants/name-colors";
+import { PROFILE_BORDER_OPTIONS, getProfileBorderStyle } from "@/constants/profile-borders";
 import { themePresets } from "@/lib/theme-presets";
 import { readCache, writeCache } from "@/lib/persistent-cache";
-import { banUserAccount } from "@/firebase/functions";
+import { banUserAccount, resetAllCrypto, resetAllGems } from "@/firebase/functions";
 import { subscribeToBookmarkedPosts } from "@/firebase/bookmarks";
 import { markAllNotificationsRead, markNotificationRead, subscribeToNotifications } from "@/firebase/notifications";
 import { UserBadges } from "@/components/common/user-badges";
@@ -79,6 +80,28 @@ function getRepliesLabel(count: number) {
   return `${count} ${count === 1 ? "reply" : "replies"}`;
 }
 
+function formatLastOnline(lastOnlineAt?: string) {
+  if (!lastOnlineAt) {
+    return "Last online unknown";
+  }
+
+  const lastSeen = new Date(lastOnlineAt);
+  const diffMs = Date.now() - lastSeen.getTime();
+  const diffMinutes = Math.max(0, Math.floor(diffMs / 60000));
+  if (diffMinutes < 2) {
+    return "Online now";
+  }
+  if (diffMinutes < 60) {
+    return `Last online ${diffMinutes}m ago`;
+  }
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `Last online ${diffHours}h ago`;
+  }
+  const diffDays = Math.floor(diffHours / 24);
+  return `Last online ${diffDays}d ago`;
+}
+
 function getNotificationVisual(type: NotificationItem["type"]) {
   switch (type) {
     case "reply":
@@ -101,6 +124,16 @@ function getNotificationVisual(type: NotificationItem["type"]) {
 }
 
 const changelogEntries = [
+  {
+    version: "V0.71",
+    date: "August 3, 2026",
+    items: [
+      "Profiles were expanded with a dedicated stats tab, visible last-online status, cleaner avatar border support, and stronger thread navigation when opening replies.",
+      "Leaderboards now include separate tabs for top level, top gems, and top posts, with the posts ranking now derived from real authored post data.",
+      "The market was expanded with new themes, animated nameplates, and profile borders, then cleaned up with simpler cards that focus on the preview and buy or equip action.",
+      "Crypto and moderation tools were refined with safer coin conversion, profitable-sale XP rewards, moderator value adjusters, and nested global reset controls for gems and crypto.",
+    ],
+  },
   {
     version: "V0.7",
     date: "August 2, 2026",
@@ -175,6 +208,11 @@ const THEME_MARKET_PRICES: Record<ThemeMode, number> = {
   midnightRose: 3400,
   lagoon: 3600,
   sunsetClub: 3800,
+  citrusPunch: 4100,
+  polarNight: 4300,
+  roseQuartz: 4500,
+  acidWash: 4700,
+  emberDusk: 4900,
 };
 
 function getOwnedThemeIds(profile: Pick<UserProfile, "ownedThemeIds" | "theme">) {
@@ -387,7 +425,7 @@ export function ProfilePage() {
   const [isTogglingFollow, setIsTogglingFollow] = useState(false);
   const [allUserPosts, setAllUserPosts] = useState<Post[]>([]);
   const [allPosts, setAllPosts] = useState<Post[]>([]);
-  const [profileTab, setProfileTab] = useState<"posts" | "replies">("posts");
+  const [profileTab, setProfileTab] = useState<"posts" | "replies" | "stats">("posts");
   const [leaderboardRank, setLeaderboardRank] = useState<number | null>(null);
   const [parentAuthors, setParentAuthors] = useState<Record<string, (typeof users)[number] | null>>({});
   const [followModalTab, setFollowModalTab] = useState<"followers" | "following" | null>(null);
@@ -546,7 +584,12 @@ export function ProfilePage() {
           <div className="flex flex-col gap-4">
             <div className="flex items-end gap-4">
               <div className="-mt-16 shrink-0 rounded-[1.75rem] border-4 border-canvas bg-canvas sm:-mt-20">
-                <Avatar name={user.displayName} src={user.photoURL} className="h-20 w-20 rounded-3xl sm:h-24 sm:w-24" />
+                <Avatar
+                  name={user.displayName}
+                  src={user.photoURL}
+                  className="h-20 w-20 rounded-3xl sm:h-24 sm:w-24"
+                  borderId={user.equippedProfileBorderId}
+                />
               </div>
               <div className="min-w-0 flex-1 pb-1">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -597,6 +640,10 @@ export function ProfilePage() {
                       Private
                     </span>
                   ) : null}
+                  <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-1 text-xs">
+                    <Clock3 size={12} />
+                    {formatLastOnline(user.lastOnlineAt)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -652,12 +699,38 @@ export function ProfilePage() {
           >
             Replies {userReplies.length}
           </button>
+          <button
+            type="button"
+            onClick={() => setProfileTab("stats")}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${profileTab === "stats" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
+          >
+            Profile
+          </button>
         </div>
 
         {!canViewPosts ? (
           <Card className="space-y-2 p-6 text-sm text-textMuted">
             <p className="inline-flex items-center gap-2 font-semibold text-text"><Lock size={16} /> Private profile</p>
             <p>Only mutual follows can view this user&apos;s posts and replies.</p>
+          </Card>
+        ) : profileTab === "stats" ? (
+          <Card className="grid gap-3 p-5 md:grid-cols-2">
+            <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
+              <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Gems</p>
+              <p className="mt-2 text-xl font-semibold tabular-nums">{user.gems}</p>
+            </div>
+            <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
+              <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Coin holdings</p>
+              <p className="mt-2 text-xl font-semibold tabular-nums">{Object.values(user.coinHoldings ?? {}).reduce((sum, amount) => sum + amount, 0).toFixed(2)}</p>
+            </div>
+            <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
+              <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Gambling gains</p>
+              <p className="mt-2 text-xl font-semibold tabular-nums text-emerald-300">+{user.gamblingGains ?? 0}</p>
+            </div>
+            <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
+              <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Gambling losses</p>
+              <p className="mt-2 text-xl font-semibold tabular-nums text-rose-300">-{user.gamblingLosses ?? 0}</p>
+            </div>
           </Card>
         ) : profileTab === "posts" ? (
           userPosts.length ? userPosts.map((post) => <PostCard key={post.id} post={post} />) : (
@@ -1280,7 +1353,8 @@ export function LoginPage() {
         className="space-y-4"
         onSubmit={form.handleSubmit(async (values) => {
           try {
-            await signInWithEmail(values.email, values.password);
+            const credential = await signInWithEmail(values.email, values.password);
+            await ensureUserProfile(credential.user);
             toast.success("Signed in");
             navigate("/");
           } catch (error) {
@@ -1344,7 +1418,8 @@ export function SignupPage() {
         className="space-y-4"
         onSubmit={form.handleSubmit(async (values) => {
           try {
-            await signUpWithEmail(values.email, values.password, values.displayName);
+            const credential = await signUpWithEmail(values.email, values.password, values.displayName);
+            await ensureUserProfile(credential.user);
             toast.success("Account created");
             navigate("/");
           } catch (error) {
@@ -2059,8 +2134,38 @@ export function MarketPage() {
     toast.success(`${option.label} purchased and equipped`);
   }
 
+  async function buyProfileBorder(borderId: string) {
+    if (!user || !profile) {
+      return;
+    }
+
+    const option = PROFILE_BORDER_OPTIONS.find((item) => item.id === borderId);
+    if (!option) {
+      return;
+    }
+
+    const owned = (profile.ownedProfileBorderIds ?? ["border-none"]).includes(borderId);
+    if (owned) {
+      await updateUserProfile(user.uid, { equippedProfileBorderId: borderId });
+      toast.success(`${option.name} equipped`);
+      return;
+    }
+
+    if (profile.gems < option.price) {
+      toast.error("Not enough gems for that profile border.");
+      return;
+    }
+
+    await addGemsToUser(user.uid, -option.price);
+    await updateUserProfile(user.uid, {
+      ownedProfileBorderIds: [...new Set([...(profile.ownedProfileBorderIds ?? ["border-none"]), borderId])],
+      equippedProfileBorderId: borderId,
+    });
+    toast.success(`${option.name} purchased and equipped`);
+  }
+
   return (
-    <PageFrame title="Market" subtitle="Spend gems on compact profile cosmetics, then unlock premium themes below your nameplate collection.">
+    <PageFrame title="Market" subtitle="Spend gems on profile cosmetics, animated nameplates, borders, and a deeper theme catalog.">
       {!user || !profile ? (
         <Card className="p-6 text-sm text-textMuted">Sign in to browse the market.</Card>
       ) : (
@@ -2068,8 +2173,18 @@ export function MarketPage() {
           <Card className="flex flex-wrap items-center justify-between gap-4 p-5">
             <div>
               <p className="text-sm text-textMuted">Preview</p>
-              <p className="mt-1 text-2xl font-bold" style={getNameColorStyle(profile.equippedNameColorId)}>{profile.displayName}</p>
-              <p className="mt-1 text-sm text-textMuted">@{profile.handle}</p>
+              <div className="mt-2 flex items-center gap-3">
+                <Avatar
+                  name={profile.displayName}
+                  src={profile.photoURL}
+                  className="h-14 w-14 rounded-3xl"
+                  borderId={profile.equippedProfileBorderId}
+                />
+                <div>
+                  <p className="text-2xl font-bold" style={getNameColorStyle(profile.equippedNameColorId)}>{profile.displayName}</p>
+                  <p className="mt-1 text-sm text-textMuted">@{profile.handle}</p>
+                </div>
+              </div>
             </div>
             <div className="rounded-2xl border border-border bg-surface px-4 py-3 text-right">
               <p className="text-xs uppercase tracking-[0.18em] text-textMuted">Gems</p>
@@ -2080,7 +2195,6 @@ export function MarketPage() {
           <div className="space-y-3">
             <div>
               <h2 className="text-lg font-semibold">Nameplates</h2>
-              <p className="text-sm text-textMuted">Compact rarity, color, and a fast buy or equip action.</p>
             </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {NAME_COLOR_OPTIONS.map((option) => {
@@ -2089,14 +2203,9 @@ export function MarketPage() {
 
               return (
                 <Card key={option.id} className="space-y-3 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="rounded-full bg-surfaceAlt px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-textMuted">
-                      {option.rarity}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="h-3.5 w-3.5 rounded-full border border-border" style={{ background: option.color }} />
-                      <span className="text-sm font-semibold" style={{ color: option.color }}>{option.name}</span>
-                    </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-3.5 w-3.5 rounded-full border border-border" style={{ background: option.color }} />
+                    <span className="text-sm font-semibold" style={{ color: option.color }}>{option.name}</span>
                   </div>
                   <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3 text-sm">
                     <p className="font-bold" style={option.animated ? getNameColorStyle(option.id) : { color: option.color }}>{profile.displayName}</p>
@@ -2117,8 +2226,40 @@ export function MarketPage() {
 
           <div className="space-y-3">
             <div>
+              <h2 className="text-lg font-semibold">Profile Borders</h2>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {PROFILE_BORDER_OPTIONS.map((option) => {
+                const owned = (profile.ownedProfileBorderIds ?? ["border-none"]).includes(option.id);
+                const equipped = profile.equippedProfileBorderId === option.id;
+
+                return (
+                  <Card key={option.id} className="space-y-4 p-4">
+                    <div className="flex flex-col items-center gap-3 rounded-3xl border border-border bg-surfaceAlt/30 p-5 text-center">
+                      <div className="rounded-[1.5rem] p-[4px]" style={getProfileBorderStyle(option.id)}>
+                        <div className="flex h-20 w-20 items-center justify-center rounded-[1.25rem] bg-surface text-xl font-bold">
+                          {profile.displayName.slice(0, 2).toUpperCase()}
+                        </div>
+                      </div>
+                      <p className="font-semibold">{option.name}</p>
+                    </div>
+                    <Button
+                      className="w-full"
+                      variant={equipped ? "secondary" : "primary"}
+                      disabled={equipped}
+                      onClick={() => void buyProfileBorder(option.id)}
+                    >
+                      {equipped ? "Equipped" : owned ? "Equip" : `Buy for ${option.price}`}
+                    </Button>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div>
               <h2 className="text-lg font-semibold">Themes</h2>
-              <p className="text-sm text-textMuted">`Graphite` and `Mist` stay free. Everything else is unlocked with gems.</p>
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {themeOptions.map((option) => {
@@ -2130,7 +2271,6 @@ export function MarketPage() {
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="font-semibold">{option.label}</p>
-                        <p className="text-xs text-textMuted">{owned ? "Owned" : `${option.price} gems`}</p>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <span className="h-4 w-4 rounded-full border border-border" style={{ background: option.tokens.background }} />
@@ -2138,7 +2278,6 @@ export function MarketPage() {
                         <span className="h-4 w-4 rounded-full border border-border" style={{ background: option.tokens.accent }} />
                       </div>
                     </div>
-                    <p className="text-sm text-textMuted">{option.description}</p>
                     <div
                       className="rounded-3xl border p-4"
                       style={{
@@ -2272,6 +2411,8 @@ export function CryptoPage() {
   const [market, setMarket] = useState<CryptoMarketState>(() => getCryptoMarketState());
   const [buyAmounts, setBuyAmounts] = useState<Record<CryptoCoinId, number>>({ wutax: 10, galaxy: 10, arc: 10, nebula: 10, spark: 10 });
   const [sellAmounts, setSellAmounts] = useState<Record<CryptoCoinId, number>>({ wutax: 0, galaxy: 0, arc: 0, nebula: 0, spark: 0 });
+  const [isModeratorPanelOpen, setIsModeratorPanelOpen] = useState(false);
+  const [isModeratorResetsOpen, setIsModeratorResetsOpen] = useState(false);
   const gems = profile?.gems ?? 0;
   const holdings = profile?.coinHoldings ?? { wutax: 0, galaxy: 0, arc: 0, nebula: 0, spark: 0 };
   const isModerator = profile?.isModerator ?? false;
@@ -2302,11 +2443,12 @@ export function CryptoPage() {
 
     setPendingActionId(`${coinId}-${gemAmount}`);
     try {
-      await investGemsInCoin(user.uid, coinId, gemAmount);
-      const nextState = applyCryptoTradeImpact(market, coinId, 1, gemAmount);
-      writeCache(CRYPTO_MARKET_KEY, nextState);
-      setMarket(nextState);
-      toast.success("Investment confirmed", { description: `-${gemAmount} gems into ${CRYPTO_COINS.find((coin) => coin.id === coinId)?.name}` });
+      const price = market.coins[coinId].currentValue;
+      const coinAmount = Number((gemAmount / price).toFixed(6));
+      await investGemsInCoin(user.uid, coinId, gemAmount, coinAmount);
+      toast.success("Investment confirmed", {
+        description: `-${gemAmount} gems converted into ${coinAmount.toFixed(4)} ${CRYPTO_COINS.find((coin) => coin.id === coinId)?.shortLabel}`,
+      });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not place that investment.");
     } finally {
@@ -2321,10 +2463,10 @@ export function CryptoPage() {
 
     setPendingActionId(`${coinId}-sell-${coinAmount}`);
     try {
-      await sellCoinForGems(user.uid, coinId, coinAmount, gemValue);
-      const nextState = applyCryptoTradeImpact(market, coinId, -1, gemValue);
-      writeCache(CRYPTO_MARKET_KEY, nextState);
-      setMarket(nextState);
+      const result = await sellCoinForGems(user.uid, coinId, coinAmount, gemValue);
+      if (result.profit > 0) {
+        await addXpToUser(user.uid, Math.max(5, Math.floor(result.profit / 4)));
+      }
       toast.success("Sale confirmed", { description: `+${gemValue} gems from ${CRYPTO_COINS.find((coin) => coin.id === coinId)?.name}` });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not complete that sale.");
@@ -2355,11 +2497,90 @@ export function CryptoPage() {
     setMarket(nextState);
   };
 
+  const runModeratorReset = async (type: "gems" | "crypto") => {
+    if (!isModerator || pendingActionId) {
+      return;
+    }
+
+    const confirmationText = type === "gems"
+      ? "Reset every user's gems to 500?"
+      : "Reset all user crypto holdings to zero?";
+    if (!window.confirm(confirmationText)) {
+      return;
+    }
+
+    setPendingActionId(`moderator-${type}`);
+    try {
+      if (type === "gems") {
+        await resetAllGems();
+        toast.success("All gems reset", { description: "Every user now has 500 gems." });
+      } else {
+        await resetAllCrypto();
+        toast.success("All crypto reset", { description: "Every user's coin holdings were cleared." });
+      }
+    } catch (error) {
+      toast.error(getFirebaseErrorMessage(error));
+    } finally {
+      setPendingActionId(null);
+    }
+  };
+
   const totalPortfolioValue = CRYPTO_COINS.reduce((sum, coin) => sum + holdings[coin.id] * market.coins[coin.id].currentValue, 0);
 
   return (
     <PageFrame title="Crypto" subtitle="Track the market, move gems in and out, and catch the 10-minute swings." titleIcon={Gem}>
       <div className="space-y-5">
+        {isModerator ? (
+          <Card className="space-y-3 p-4">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between rounded-2xl border border-border bg-surfaceAlt/30 px-4 py-3 text-left"
+              onClick={() => setIsModeratorPanelOpen((current) => !current)}
+            >
+              <span className="inline-flex items-center gap-2 font-semibold"><Hammer size={16} /> Moderator panel</span>
+              {isModeratorPanelOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </button>
+            {isModeratorPanelOpen ? (
+              <div className="space-y-3">
+                <div className="grid gap-3 md:grid-cols-2">
+                  {CRYPTO_COINS.map((coin) => (
+                    <div key={`moderate-${coin.id}`} className="rounded-2xl border border-border bg-surfaceAlt/20 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold" style={{ color: coin.accent }}>{coin.name}</p>
+                        <span className="text-sm font-semibold tabular-nums">{market.coins[coin.id].currentValue.toFixed(2)}</span>
+                      </div>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        <Button variant="secondary" className="w-full" onClick={() => moderateCoin(coin.id, 1)}>Buff +5%</Button>
+                        <Button variant="secondary" className="w-full" onClick={() => moderateCoin(coin.id, -1)}>Nerf -5%</Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-2xl border border-border bg-surfaceAlt/20 p-3">
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between text-left text-sm font-semibold"
+                    onClick={() => setIsModeratorResetsOpen((current) => !current)}
+                  >
+                    <span>Reset tools</span>
+                    {isModeratorResetsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  </button>
+                  {isModeratorResetsOpen ? (
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <Button variant="secondary" className="w-full" disabled={pendingActionId !== null} onClick={() => void runModeratorReset("gems")}>
+                        Reset all gems to 500
+                      </Button>
+                      <Button variant="secondary" className="w-full" disabled={pendingActionId !== null} onClick={() => void runModeratorReset("crypto")}>
+                        Reset all crypto
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </Card>
+        ) : null}
+
         <Card className="grid gap-3 p-5 sm:grid-cols-3">
           <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
             <p className="flex items-center gap-2 text-sm text-textMuted"><Gem size={16} /> Available gems</p>
@@ -2385,6 +2606,7 @@ export function CryptoPage() {
             const buyAmount = Math.min(buyAmounts[coin.id], Math.max(gems, 1));
             const sellAmount = Math.min(sellAmounts[coin.id], holdings[coin.id]);
             const sellGemValue = Math.max(1, Math.floor(sellAmount * coinMarket.currentValue));
+            const buyCoinAmount = Number((buyAmount / coinMarket.currentValue).toFixed(4));
             const chartStroke = chartDelta >= 0 ? "#4ade80" : "#f87171";
 
             return (
@@ -2454,6 +2676,7 @@ export function CryptoPage() {
                       <p className="text-sm font-semibold">Buy</p>
                       <span className="text-sm font-semibold tabular-nums">{buyAmount} gems</span>
                     </div>
+                    <p className="mt-2 text-xs text-textMuted">Converts into {buyCoinAmount.toFixed(4)} coins at the current market price.</p>
                     <input
                       type="range"
                       min={1}
@@ -2473,7 +2696,7 @@ export function CryptoPage() {
                       disabled={!user || pendingActionId !== null || gems < 1}
                       onClick={() => void invest(coin.id, buyAmount)}
                     >
-                      {pendingActionId === `${coin.id}-${buyAmount}` ? "Buying..." : `Buy ${buyAmount}`}
+                      {pendingActionId === `${coin.id}-${buyAmount}` ? "Buying..." : `Buy ${buyCoinAmount.toFixed(4)} ${coin.shortLabel}`}
                     </Button>
                   </div>
 
@@ -2507,12 +2730,6 @@ export function CryptoPage() {
                   </div>
                 </div>
 
-                {isModerator ? (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <Button variant="secondary" className="w-full" onClick={() => moderateCoin(coin.id, 1)}>Buff +5%</Button>
-                    <Button variant="secondary" className="w-full" onClick={() => moderateCoin(coin.id, -1)}>Nerf -5%</Button>
-                  </div>
-                ) : null}
               </Card>
             );
           })}
@@ -2540,20 +2757,81 @@ export function ShopPage() {
 
 export function LeaderboardPage() {
   const navigate = useNavigate();
+  const [leaderboardTab, setLeaderboardTab] = useState<"level" | "gems" | "posts">("level");
   const [leaders, setLeaders] = useState(users);
+  const [allPosts, setAllPosts] = useState<Post[]>([]);
 
-  useEffect(() => subscribeToXpLeaderboard(setLeaders), []);
+  useEffect(() => subscribeToPosts(setAllPosts), []);
+
+  useEffect(() => {
+    if (leaderboardTab === "level") {
+      return subscribeToXpLeaderboard(setLeaders);
+    }
+
+    if (leaderboardTab === "posts") {
+      return subscribeToUserProfiles((profiles) => {
+        const postCounts = allPosts.reduce<Record<string, number>>((accumulator, post) => {
+          accumulator[post.authorId] = (accumulator[post.authorId] ?? 0) + 1;
+          return accumulator;
+        }, {});
+
+        setLeaders(
+          profiles
+            .map((profile) => ({
+              ...profile,
+              postCount: postCounts[profile.uid] ?? 0,
+            }))
+            .sort((left, right) => right.postCount - left.postCount)
+            .slice(0, 20),
+        );
+      });
+    }
+
+    return subscribeToUserLeaderboard(leaderboardTab === "gems" ? "gems" : "postCount", setLeaders);
+  }, [allPosts, leaderboardTab]);
+
+  const metricLabel = leaderboardTab === "level" ? "Level" : leaderboardTab === "gems" ? "Gems" : "Posts";
 
   return (
-    <PageFrame title="Leaderboard" subtitle="Top users ranked by level only. XP no longer affects placement.">
+    <PageFrame title="Leaderboard" subtitle="Switch between the top level, top gems, and top posts leaders.">
       <div className="space-y-4">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setLeaderboardTab("level")}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${leaderboardTab === "level" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
+          >
+            Top level
+          </button>
+          <button
+            type="button"
+            onClick={() => setLeaderboardTab("gems")}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${leaderboardTab === "gems" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
+          >
+            Top gems
+          </button>
+          <button
+            type="button"
+            onClick={() => setLeaderboardTab("posts")}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${leaderboardTab === "posts" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
+          >
+            Top posts
+          </button>
+        </div>
         {leaders.map((leader, index) => {
+          const metricValue = leaderboardTab === "level" ? leader.level : leaderboardTab === "gems" ? leader.gems : leader.postCount;
+
           return (
             <Card key={leader.uid} className="overflow-hidden p-0">
               <div className="h-24 w-full" style={formatBannerStyle(leader)} />
               <div className="relative p-5">
                 <div className="absolute -top-8 left-5 flex h-16 w-16 items-center justify-center rounded-[1.75rem] border-4 border-canvas bg-canvas">
-                  <Avatar name={leader.displayName} src={leader.photoURL} className="h-full w-full rounded-[1.2rem]" />
+                  <Avatar
+                    name={leader.displayName}
+                    src={leader.photoURL}
+                    className="h-full w-full rounded-[1.2rem]"
+                    borderId={leader.equippedProfileBorderId}
+                  />
                 </div>
                 <div className="flex items-start justify-between gap-4 pt-10">
                   <div className="min-w-0">
@@ -2574,8 +2852,8 @@ export function LeaderboardPage() {
                     <p className="mt-2 line-clamp-2 text-sm text-textMuted">{leader.bio || "No bio yet."}</p>
                   </div>
                   <div className="rounded-2xl border border-border bg-surface/80 px-4 py-3 text-right backdrop-blur-sm">
-                    <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Level</p>
-                    <p className="mt-1 text-2xl font-bold">{leader.level}</p>
+                    <p className="text-xs uppercase tracking-[0.16em] text-textMuted">{metricLabel}</p>
+                    <p className="mt-1 text-2xl font-bold">{metricValue}</p>
                   </div>
                 </div>
 

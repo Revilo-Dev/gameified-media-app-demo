@@ -3,7 +3,7 @@ import { Dices } from "lucide-react";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { useAuth } from "@/app/auth-provider";
-import { addGemsToUser, subscribeToUserProfileById } from "@/firebase/users";
+import { addGamblingResult, addGemsToUser, addXpToUser, subscribeToUserProfileById } from "@/firebase/users";
 import type { UserProfile } from "@/types/models";
 
 const SIDES = [1, 2, 3, 4, 5, 6] as const;
@@ -37,6 +37,7 @@ export function DiceGame() {
 
     setIsRolling(true);
     await addGemsToUser(user.uid, -wager);
+    await addGamblingResult(user.uid, "loss", wager);
 
     for (let index = 0; index < 12; index += 1) {
       await new Promise((resolve) => setTimeout(resolve, 70));
@@ -49,6 +50,8 @@ export function DiceGame() {
     if (result === pickedSide) {
       const payout = wager * 4;
       await addGemsToUser(user.uid, payout);
+      await addGamblingResult(user.uid, "gain", payout);
+      await addXpToUser(user.uid, Math.max(8, Math.floor(payout / 4)));
     }
 
     setIsRolling(false);

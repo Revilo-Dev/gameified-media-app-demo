@@ -153,3 +153,43 @@ export const deletePostCascade = onCall(async (request) => {
     await deletePostCascadeAdmin(postId);
     return { ok: true };
 });
+async function assertModerator(uid) {
+    const moderatorSnapshot = await db.collection("users").doc(uid).get();
+    if (!moderatorSnapshot.exists || moderatorSnapshot.get("isModerator") !== true) {
+        throw new HttpsError("permission-denied", "Moderator access required.");
+    }
+}
+export const resetAllGems = onCall(async (request) => {
+    if (!request.auth?.uid) {
+        throw new HttpsError("unauthenticated", "You must be signed in.");
+    }
+    await assertModerator(request.auth.uid);
+    const usersSnapshot = await db.collection("users").get();
+    for (const userDocument of usersSnapshot.docs) {
+        await userDocument.ref.update({
+            gems: 500,
+            updatedAt: FieldValue.serverTimestamp(),
+        });
+    }
+    return { ok: true };
+});
+export const resetAllCrypto = onCall(async (request) => {
+    if (!request.auth?.uid) {
+        throw new HttpsError("unauthenticated", "You must be signed in.");
+    }
+    await assertModerator(request.auth.uid);
+    const usersSnapshot = await db.collection("users").get();
+    for (const userDocument of usersSnapshot.docs) {
+        await userDocument.ref.update({
+            coinHoldings: {
+                wutax: 0,
+                galaxy: 0,
+                arc: 0,
+                nebula: 0,
+                spark: 0,
+            },
+            updatedAt: FieldValue.serverTimestamp(),
+        });
+    }
+    return { ok: true };
+});

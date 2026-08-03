@@ -12,6 +12,24 @@ export type CryptoMarketState = {
   coins: Record<CryptoCoinId, { currentValue: number; history: number[] }>;
 };
 
+export function getTradeImpact(volume: number) {
+  return Math.min(0.12, Math.max(0.01, volume / 500));
+}
+
+export function getNextTradePrice(currentValue: number, direction: 1 | -1, volume: number) {
+  const impact = getTradeImpact(volume);
+  return Math.max(0.1, Number((currentValue * (1 + direction * impact)).toFixed(2)));
+}
+
+export function getExecutedBuyCoinAmount(currentValue: number, volume: number) {
+  const nextValue = getNextTradePrice(currentValue, 1, volume);
+  return Number((volume / nextValue).toFixed(2));
+}
+
+export function getExecutedSellGemValue(currentValue: number, coinAmount: number) {
+  return Number((coinAmount * currentValue).toFixed(2));
+}
+
 export function createInitialCryptoMarketState(): CryptoMarketState {
   return {
     lastUpdatedAt: Date.now(),
@@ -48,7 +66,7 @@ export function rollCryptoMarket(previous: CryptoMarketState) {
   };
 }
 
-function normalizeMarketState(raw: unknown): CryptoMarketState {
+export function normalizeMarketState(raw: unknown): CryptoMarketState {
   const fallback = createInitialCryptoMarketState();
   const data = typeof raw === "object" && raw !== null ? raw as Partial<CryptoMarketState> : {};
   const fallbackCoins = fallback.coins;
@@ -114,8 +132,7 @@ export async function updateCryptoMarketForTrade(coinId: CryptoCoinId, direction
     const snapshot = await transaction.get(marketRef);
     const currentMarket = snapshot.exists() ? normalizeMarketState(snapshot.data()) : createInitialCryptoMarketState();
     const currentCoin = currentMarket.coins[coinId];
-    const impact = Math.min(0.12, Math.max(0.01, volume / 500));
-    const nextValue = Math.max(0.1, Number((currentCoin.currentValue * (1 + direction * impact)).toFixed(2)));
+    const nextValue = getNextTradePrice(currentCoin.currentValue, direction, volume);
 
     transaction.set(marketRef, {
       lastUpdatedAt: Date.now(),

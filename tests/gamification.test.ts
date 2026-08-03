@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getXpProgress, xpRequiredForLevel } from "@/constants/gamification";
 import { canAwardDailyPostXp, hasPostingCooldownElapsed, shouldAwardPostXp } from "@/features/gamification/anti-abuse";
+import { getExecutedBuyCoinAmount, getExecutedSellGemValue, getNextTradePrice } from "@/firebase/crypto-market";
 
 describe("gamification helpers", () => {
   it("calculates required xp per level", () => {
@@ -21,5 +22,15 @@ describe("gamification helpers", () => {
     const now = new Date("2026-07-15T07:00:00.000Z");
     expect(hasPostingCooldownElapsed(new Date("2026-07-15T06:58:30.000Z"), now)).toBe(true);
     expect(shouldAwardPostXp(3, new Date("2026-07-15T06:59:30.000Z"), now)).toBe(false);
+  });
+
+  it("prevents instant buy-sell crypto loops from minting gems", () => {
+    const startingPrice = 1;
+    const buyVolume = 100;
+    const boughtCoins = getExecutedBuyCoinAmount(startingPrice, buyVolume);
+    const pumpedPrice = getNextTradePrice(startingPrice, 1, buyVolume);
+    const saleValue = getExecutedSellGemValue(pumpedPrice, boughtCoins);
+
+    expect(saleValue).toBeLessThanOrEqual(buyVolume);
   });
 });

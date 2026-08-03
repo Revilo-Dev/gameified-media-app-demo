@@ -345,6 +345,12 @@ export async function throwRottenTomato(postId: string, user: UserProfile) {
       gems: currentGems - tomatoCost,
       updatedAt: serverTimestamp(),
     });
+    if (authorId) {
+      transaction.update(doc(db, COLLECTIONS.users, authorId), {
+        rottenTomatoCount: increment(1),
+        updatedAt: serverTimestamp(),
+      });
+    }
     transaction.update(postRef, {
       rottenTomatoCount: nextTomatoes,
       reactionCount: increment(1),

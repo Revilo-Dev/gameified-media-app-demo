@@ -18,7 +18,7 @@ import { conversations, messages, shopItems, users } from "@/lib/demo-data";
 import { bannerPresets } from "@/lib/banner-presets";
 import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/auth";
 import { useAuth } from "@/app/auth-provider";
-import { addGemsToUser, addXpToUser, ensureUserProfile, getDemoUserByHandle, investGemsInCoin, isHandleAvailable, sellCoinForGems, subscribeToUserLeaderboard, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToUserProfiles, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
+import { addGemsToUser, addXpToUser, ensureUserProfile, executeCoinPurchase, executeCoinSale, getDemoUserByHandle, isHandleAvailable, subscribeToUserLeaderboard, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToUserProfiles, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
 import { changeUserPassword, linkGoogleAccount, updateDisplayName, uploadProfileBanner, uploadProfilePicture } from "@/firebase/auth";
 import { deletePostCascade, subscribeToPosts, subscribeToPostsByAuthor } from "@/firebase/posts";
 import { InlineEntities } from "@/components/common/inline-entities";
@@ -31,12 +31,14 @@ import { PROFILE_BORDER_OPTIONS, getProfileBorderStyle } from "@/constants/profi
 import { themePresets } from "@/lib/theme-presets";
 import { readCache, writeCache } from "@/lib/persistent-cache";
 import { banUserAccount, resetAllCrypto, resetAllGems } from "@/firebase/functions";
-import { createInitialCryptoMarketState, moderateCryptoMarket, subscribeToCryptoMarket, type CryptoMarketState, updateCryptoMarketForTrade } from "@/firebase/crypto-market";
+import { createInitialCryptoMarketState, moderateCryptoMarket, subscribeToCryptoMarket, type CryptoMarketState } from "@/firebase/crypto-market";
 import { subscribeToBookmarkedPosts } from "@/firebase/bookmarks";
 import { markAllNotificationsRead, markNotificationRead, subscribeToNotifications } from "@/firebase/notifications";
+import { TomatoIcon } from "@/components/common/tomato-icon";
 import { UserBadges } from "@/components/common/user-badges";
 import { PostCard } from "@/components/posts/post-card";
 import { PostComposer } from "@/components/posts/post-composer";
+import { formatAmount } from "@/lib/utils";
 import type { Conversation, CryptoCoinId, Message, NotificationItem, Post, ThemeMode, UserProfile } from "@/types/models";
 
 function getFirebaseErrorMessage(error: unknown) {
@@ -493,8 +495,6 @@ export function ProfilePage() {
   const [followerIds, setFollowerIds] = useState<string[]>([]);
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [followProfiles, setFollowProfiles] = useState<Record<string, UserProfile | null>>({});
-  const [isEditingGems, setIsEditingGems] = useState(false);
-  const [gemInput, setGemInput] = useState("");
   const [market, setMarket] = useState<CryptoMarketState>(() => createInitialCryptoMarketState());
 
   useEffect(() => {
@@ -632,8 +632,6 @@ export function ProfilePage() {
     [followProfiles, visibleFollowIds],
   );
   const timeoutLabel = getTimeoutRemainingLabel(user?.timeoutUntil);
-  const canModerateGems = Boolean(user && currentUserId && currentUserId !== user.uid);
-
   if (!user) {
     return (
       <PageFrame title="Profile not found" subtitle="This profile is not available in the current demo dataset.">
@@ -726,54 +724,10 @@ export function ProfilePage() {
                 <p className="mt-1 font-semibold">{leaderboardRank ? `#${leaderboardRank}` : "Unranked"}</p>
               </div>
               <div className="rounded-2xl border border-border bg-surfaceAlt/50 px-3 py-2">
-                <p className="text-xs text-textMuted">Gems</p>
-                {isEditingGems ? (
-                  <div className="mt-2 space-y-2">
-                    <input
-                      type="number"
-                      value={gemInput}
-                      onChange={(event) => setGemInput(event.target.value)}
-                      className="w-full rounded-2xl border border-border bg-transparent px-3 py-2 text-sm outline-none"
-                    />
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        onClick={async () => {
-                          const nextValue = Number(Math.max(0, Number(gemInput)).toFixed(2));
-                          if (!Number.isFinite(nextValue)) {
-                            toast.error("Enter a valid gem amount.");
-                            return;
-                          }
-
-                          try {
-                            await updateUserProfile(user.uid, { gems: nextValue });
-                            toast.success("Gems updated");
-                            setIsEditingGems(false);
-                          } catch (error) {
-                            toast.error(getFirebaseErrorMessage(error));
-                          }
-                        }}
-                      >
-                        Save
-                      </Button>
-                      <Button size="sm" variant="secondary" onClick={() => setIsEditingGems(false)}>Cancel</Button>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className={`mt-1 inline-flex items-center gap-1 font-semibold ${canModerateGems ? "hover:text-[color:var(--accent)]" : ""}`}
-                    onClick={() => {
-                      if (!canModerateGems) {
-                        return;
-                      }
-                      setGemInput(String(user.gems));
-                      setIsEditingGems(true);
-                    }}
-                  >
-                    <Gem size={14} /> {user.gems.toFixed(2)}
-                  </button>
-                )}
+                <p className="text-xs text-textMuted">Rotten tomatoes</p>
+                <p className="mt-1 inline-flex items-center gap-1 font-semibold text-rose-300">
+                  <TomatoIcon className="h-4 w-4" /> {user.rottenTomatoCount ?? 0}
+                </p>
               </div>
             </div>
           </div>
@@ -838,11 +792,11 @@ export function ProfilePage() {
             <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
               <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Gems</p>
-              <p className="mt-2 text-xl font-semibold tabular-nums">{user.gems.toFixed(2)}</p>
+              <p className="mt-2 text-xl font-semibold tabular-nums">{formatAmount(user.gems)}</p>
             </div>
             <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
-              <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Liquid value</p>
-              <p className="mt-2 text-xl font-semibold tabular-nums">{user.gems.toFixed(2)}</p>
+              <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Rotten tomatoes taken</p>
+              <p className="mt-2 inline-flex items-center gap-2 text-xl font-semibold tabular-nums text-rose-300"><TomatoIcon className="h-5 w-5" /> {user.rottenTomatoCount ?? 0}</p>
             </div>
             <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
               <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Illiquid value</p>
@@ -854,24 +808,35 @@ export function ProfilePage() {
             </div>
             <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
               <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Gambling gains</p>
-              <p className="mt-2 text-xl font-semibold tabular-nums text-emerald-300">+{user.gamblingGains ?? 0}</p>
+              <p className="mt-2 text-xl font-semibold tabular-nums text-emerald-300">+{formatAmount(user.gamblingGains ?? 0)}</p>
             </div>
             <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
               <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Gambling losses</p>
-              <p className="mt-2 text-xl font-semibold tabular-nums text-rose-300">-{user.gamblingLosses ?? 0}</p>
+              <p className="mt-2 text-xl font-semibold tabular-nums text-rose-300">-{formatAmount(user.gamblingLosses ?? 0)}</p>
             </div>
             </div>
             <div className="rounded-2xl border border-border bg-surfaceAlt/35 p-4">
               <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Owned coins</p>
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
                 {CRYPTO_COINS.filter((coin) => (user.coinHoldings?.[coin.id] ?? 0) > 0).length ? CRYPTO_COINS.filter((coin) => (user.coinHoldings?.[coin.id] ?? 0) > 0).map((coin) => (
-                  <div key={coin.id} className="rounded-2xl border border-border bg-surface px-3 py-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="font-semibold" style={{ color: coin.accent }}>{coin.shortLabel}</span>
-                      <span className="text-sm tabular-nums">{(user.coinHoldings?.[coin.id] ?? 0).toFixed(2)}</span>
+                  <div key={coin.id} className="rounded-[1.4rem] border border-border bg-[linear-gradient(135deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <span className="font-semibold" style={{ color: coin.accent }}>{coin.name}</span>
+                        <p className="mt-1 text-xs uppercase tracking-[0.18em] text-textMuted">{coin.shortLabel}</p>
+                      </div>
+                      <span className="rounded-full border border-border bg-surfaceAlt/50 px-2.5 py-1 text-xs font-semibold tabular-nums">{formatAmount(user.coinHoldings?.[coin.id] ?? 0)} coins</span>
                     </div>
-                    <p className="mt-1 text-sm text-textMuted">{coin.name}</p>
-                    <p className="mt-2 text-sm font-semibold tabular-nums">{(((user.coinHoldings?.[coin.id] ?? 0) * market.coins[coin.id].currentValue)).toFixed(2)}</p>
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      <div className="rounded-2xl border border-border bg-surface px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-textMuted">Spot</p>
+                        <p className="mt-1 text-sm font-semibold tabular-nums">{formatAmount(market.coins[coin.id].currentValue)}</p>
+                      </div>
+                      <div className="rounded-2xl border border-border bg-surface px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-textMuted">Value</p>
+                        <p className="mt-1 text-sm font-semibold tabular-nums">{formatAmount((user.coinHoldings?.[coin.id] ?? 0) * market.coins[coin.id].currentValue)}</p>
+                      </div>
+                    </div>
                   </div>
                 )) : <p className="text-sm text-textMuted">No coins owned yet.</p>}
               </div>
@@ -2592,13 +2557,10 @@ export function CryptoPage() {
 
     setPendingActionId(`${coinId}-${gemAmount}`);
     try {
-      const price = market.coins[coinId].currentValue;
       const roundedGemAmount = Number(gemAmount.toFixed(2));
-      const coinAmount = Number((roundedGemAmount / price).toFixed(6));
-      await investGemsInCoin(user.uid, coinId, roundedGemAmount, coinAmount);
-      await updateCryptoMarketForTrade(coinId, 1, roundedGemAmount);
+      const result = await executeCoinPurchase(user.uid, coinId, roundedGemAmount);
       toast.success("Investment confirmed", {
-        description: `-${roundedGemAmount.toFixed(2)} gems invested into ${CRYPTO_COINS.find((coin) => coin.id === coinId)?.shortLabel}`,
+        description: `-${roundedGemAmount.toFixed(2)} gems invested for ${result.coinAmount.toFixed(2)} ${CRYPTO_COINS.find((coin) => coin.id === coinId)?.shortLabel}`,
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not place that investment.");
@@ -2607,19 +2569,18 @@ export function CryptoPage() {
     }
   };
 
-  const sell = async (coinId: CryptoCoinId, coinAmount: number, gemValue: number) => {
+  const sell = async (coinId: CryptoCoinId, coinAmount: number) => {
     if (!user || pendingActionId || coinAmount <= 0) {
       return;
     }
 
     setPendingActionId(`${coinId}-sell-${coinAmount}`);
     try {
-      const result = await sellCoinForGems(user.uid, coinId, coinAmount, gemValue);
-      await updateCryptoMarketForTrade(coinId, -1, gemValue);
+      const result = await executeCoinSale(user.uid, coinId, coinAmount);
       if (result.profit > 0) {
         await addXpToUser(user.uid, Math.max(5, Math.floor(result.profit / 4)));
       }
-      toast.success("Sale confirmed", { description: `+${gemValue.toFixed(2)} gems from ${CRYPTO_COINS.find((coin) => coin.id === coinId)?.name}` });
+      toast.success("Sale confirmed", { description: `+${result.gemValue.toFixed(2)} gems from ${CRYPTO_COINS.find((coin) => coin.id === coinId)?.name}` });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not complete that sale.");
     } finally {
@@ -2722,11 +2683,11 @@ export function CryptoPage() {
         <Card className="grid gap-3 p-5 sm:grid-cols-3">
           <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
             <p className="flex items-center gap-2 text-sm text-textMuted"><Gem size={16} /> Available gems</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums">{gems}</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums">{formatAmount(gems)}</p>
           </div>
           <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
             <p className="flex items-center gap-2 text-sm text-textMuted"><Sparkles size={16} /> Coins held</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums">{Object.values(holdings).reduce((sum, amount) => sum + amount, 0)}</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums">{formatAmount(Object.values(holdings).reduce((sum, amount) => sum + amount, 0))}</p>
           </div>
           <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
             <p className="flex items-center gap-2 text-sm text-textMuted"><Globe2 size={16} /> Portfolio value</p>
@@ -2744,7 +2705,7 @@ export function CryptoPage() {
             const buyAmount = Math.min(buyAmounts[coin.id], Math.max(gems, 0.01));
             const sellAmount = Math.min(sellAmounts[coin.id], holdings[coin.id]);
             const sellGemValue = Number((sellAmount * coinMarket.currentValue).toFixed(2));
-            const buyCoinAmount = Number((buyAmount / coinMarket.currentValue).toFixed(4));
+            const buyCoinAmount = Number((buyAmount / coinMarket.currentValue).toFixed(2));
             const chartStroke = chartDelta >= 0 ? "#4ade80" : "#f87171";
 
             return (
@@ -2809,9 +2770,22 @@ export function CryptoPage() {
                       })}
                     </div>
                   </div>
-                <div className="rounded-2xl border border-border bg-surfaceAlt/30 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.18em] text-textMuted">Holding</p>
-                  <p className="mt-1 text-lg font-semibold tabular-nums">{holdings[coin.id].toFixed(2)} | ${holdingsValue.toFixed(2)} | {chartDelta >= 0 ? "+" : ""}{chartDelta.toFixed(0)}%</p>
+                <div className="rounded-[1.5rem] border border-border bg-[linear-gradient(135deg,rgba(255,255,255,0.04),rgba(255,255,255,0.015))] p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-textMuted">Your position</p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                    <div className="rounded-2xl border border-border bg-surface px-3 py-2">
+                      <p className="text-[11px] uppercase tracking-[0.16em] text-textMuted">Holding</p>
+                      <p className="mt-1 text-sm font-semibold tabular-nums">{formatAmount(holdings[coin.id])} {coin.shortLabel}</p>
+                    </div>
+                    <div className="rounded-2xl border border-border bg-surface px-3 py-2">
+                      <p className="text-[11px] uppercase tracking-[0.16em] text-textMuted">Value</p>
+                      <p className="mt-1 text-sm font-semibold tabular-nums">{formatAmount(holdingsValue)} gems</p>
+                    </div>
+                    <div className="rounded-2xl border border-border bg-surface px-3 py-2">
+                      <p className="text-[11px] uppercase tracking-[0.16em] text-textMuted">Trend</p>
+                      <p className={`mt-1 text-sm font-semibold tabular-nums ${chartDelta >= 0 ? "text-emerald-300" : "text-rose-300"}`}>{chartDelta >= 0 ? "+" : ""}{formatAmount(chartDelta)}%</p>
+                    </div>
+                  </div>
                 </div>
                 </div>
 
@@ -2840,7 +2814,7 @@ export function CryptoPage() {
                       disabled={!user || pendingActionId !== null || gems < 0.01}
                       onClick={() => void invest(coin.id, buyAmount)}
                     >
-                      {pendingActionId === `${coin.id}-${buyAmount}` ? "Buying..." : `Buy ${buyCoinAmount.toFixed(4)} ${coin.shortLabel}`}
+                      {pendingActionId === `${coin.id}-${buyAmount}` ? "Buying..." : `Buy ${buyCoinAmount.toFixed(2)} ${coin.shortLabel}`}
                     </Button>
                   </div>
 
@@ -2867,7 +2841,7 @@ export function CryptoPage() {
                       variant="secondary"
                       className="mt-4 w-full"
                       disabled={!user || pendingActionId !== null || sellAmount < 0.01}
-                      onClick={() => void sell(coin.id, sellAmount, sellGemValue)}
+                      onClick={() => void sell(coin.id, sellAmount)}
                     >
                       {pendingActionId === `${coin.id}-sell-${sellAmount}` ? "Selling..." : `Sell ${sellAmount.toFixed(2)} for ${sellGemValue.toFixed(2)}`}
                     </Button>

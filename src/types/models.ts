@@ -67,6 +67,7 @@ export interface UserProfile {
   followerCount: number;
   followingCount: number;
   postCount: number;
+  rottenTomatoCount: number;
   badgeCount: number;
   joinedAt: string;
   lastOnlineAt?: string;

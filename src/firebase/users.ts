@@ -1,6 +1,7 @@
 import { collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, type Unsubscribe } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import { db } from "@/firebase/config";
+import { createInitialCryptoMarketState, getExecutedBuyCoinAmount, getExecutedSellGemValue, getNextTradePrice, normalizeMarketState } from "@/firebase/crypto-market";
 import { COLLECTIONS } from "@/firebase/firestore";
 import { createNotification } from "@/firebase/notifications";
 import { getLevelForXp } from "@/constants/gamification";
@@ -31,6 +32,10 @@ function normalizeCoinInvestmentTotals(totals: Partial<Record<CryptoCoinId, numb
     nebula: Number(totals?.nebula ?? 0),
     spark: Number(totals?.spark ?? 0),
   } satisfies Record<CryptoCoinId, number>;
+}
+
+function normalizeGemAmount(value: number, minimum = 0) {
+  return Number(Math.max(minimum, value).toFixed(2));
 }
 
 async function createUniqueHandle(baseHandle: string, currentUserId?: string) {
@@ -96,6 +101,7 @@ export async function ensureUserProfile(user: User) {
     followerCount: 0,
     followingCount: 0,
     postCount: 0,
+    rottenTomatoCount: 0,
     badgeCount: 0,
     joinedAt: new Date().toISOString(),
     lastOnlineAt: new Date().toISOString(),
@@ -231,7 +237,7 @@ export async function investGemsInCoin(userId: string, coinId: CryptoCoinId, gem
     }
 
     const safeGemCost = Number(Math.max(0.01, gemCost).toFixed(2));
-    const safeCoinAmount = Number(coinAmount.toFixed(6));
+    const safeCoinAmount = Number(coinAmount.toFixed(2));
     const currentGems = Number(snapshot.data().gems ?? 0);
     if (currentGems < safeGemCost) {
       throw new Error(`You need ${safeGemCost} gems to invest in ${coinId} coin.`);
@@ -248,11 +254,11 @@ export async function investGemsInCoin(userId: string, coinId: CryptoCoinId, gem
       gems: currentGems - safeGemCost,
       coinHoldings: {
         ...currentHoldings,
-        [coinId]: Number((currentHoldings[coinId] + safeCoinAmount).toFixed(6)),
+        [coinId]: Number((currentHoldings[coinId] + safeCoinAmount).toFixed(2)),
       },
       coinInvestmentTotals: {
         ...currentInvestmentTotals,
-        [coinId]: Number((currentInvestmentTotals[coinId] + safeGemCost).toFixed(6)),
+        [coinId]: Number((currentInvestmentTotals[coinId] + safeGemCost).toFixed(2)),
       },
       updatedAt: serverTimestamp(),
     });
@@ -277,24 +283,145 @@ export async function sellCoinForGems(userId: string, coinId: CryptoCoinId, coin
       throw new Error(`You only have ${currentCoinAmount} ${coinId} to sell.`);
     }
     const currentInvestment = Number(currentInvestmentTotals[coinId] ?? 0);
-    const soldCostBasis = currentCoinAmount <= 0 ? 0 : Number(((currentInvestment / currentCoinAmount) * coinAmount).toFixed(6));
+    const soldCostBasis = currentCoinAmount <= 0 ? 0 : Number(((currentInvestment / currentCoinAmount) * coinAmount).toFixed(2));
     profit = Math.max(0, gemValue - soldCostBasis);
 
     transaction.update(ref, {
       gems: Number((Number(snapshot.data().gems ?? 0) + gemValue).toFixed(2)),
       coinHoldings: {
         ...currentHoldings,
-        [coinId]: Number(Math.max(0, currentCoinAmount - coinAmount).toFixed(6)),
+        [coinId]: Number(Math.max(0, currentCoinAmount - coinAmount).toFixed(2)),
       },
       coinInvestmentTotals: {
         ...currentInvestmentTotals,
-        [coinId]: Number(Math.max(0, currentInvestment - soldCostBasis).toFixed(6)),
+        [coinId]: Number(Math.max(0, currentInvestment - soldCostBasis).toFixed(2)),
       },
       updatedAt: serverTimestamp(),
     });
   });
 
   return { profit };
+}
+
+export async function executeCoinPurchase(userId: string, coinId: CryptoCoinId, gemCost: number) {
+  const userRef = doc(db, COLLECTIONS.users, userId);
+  const marketRef = doc(db, COLLECTIONS.markets, "global");
+  let coinAmount = 0;
+
+  await runTransaction(db, async (transaction) => {
+    const userSnapshot = await transaction.get(userRef);
+    if (!userSnapshot.exists()) {
+      throw new Error("User profile is missing.");
+    }
+
+    const marketSnapshot = await transaction.get(marketRef);
+    const currentMarket = marketSnapshot.exists() ? normalizeMarketState(marketSnapshot.data()) : createInitialCryptoMarketState();
+    const safeGemCost = normalizeGemAmount(gemCost, 0.01);
+    const currentGems = Number(userSnapshot.data().gems ?? 0);
+    if (currentGems < safeGemCost) {
+      throw new Error(`You need ${safeGemCost} gems to invest in ${coinId} coin.`);
+    }
+
+    const currentCoin = currentMarket.coins[coinId];
+    coinAmount = getExecutedBuyCoinAmount(currentCoin.currentValue, safeGemCost);
+    if (coinAmount <= 0) {
+      throw new Error("That purchase does not convert into any coin.");
+    }
+
+    const currentHoldings = normalizeCoinHoldings((userSnapshot.data().coinHoldings ?? {}) as Partial<Record<CryptoCoinId, number>>);
+    const currentInvestmentTotals = normalizeCoinInvestmentTotals((userSnapshot.data().coinInvestmentTotals ?? {}) as Partial<Record<CryptoCoinId, number>>);
+    const nextValue = getNextTradePrice(currentCoin.currentValue, 1, safeGemCost);
+
+    transaction.update(userRef, {
+      gems: normalizeGemAmount(currentGems - safeGemCost),
+      coinHoldings: {
+        ...currentHoldings,
+        [coinId]: Number((currentHoldings[coinId] + coinAmount).toFixed(2)),
+      },
+      coinInvestmentTotals: {
+        ...currentInvestmentTotals,
+        [coinId]: Number((currentInvestmentTotals[coinId] + safeGemCost).toFixed(2)),
+      },
+      updatedAt: serverTimestamp(),
+    });
+
+    transaction.set(marketRef, {
+      lastUpdatedAt: Date.now(),
+      coins: {
+        ...currentMarket.coins,
+        [coinId]: {
+          currentValue: nextValue,
+          history: [...currentCoin.history.slice(-17), nextValue],
+        },
+      },
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  });
+
+  return { coinAmount };
+}
+
+export async function executeCoinSale(userId: string, coinId: CryptoCoinId, coinAmount: number) {
+  const userRef = doc(db, COLLECTIONS.users, userId);
+  const marketRef = doc(db, COLLECTIONS.markets, "global");
+  let profit = 0;
+  let gemValue = 0;
+
+  await runTransaction(db, async (transaction) => {
+    const userSnapshot = await transaction.get(userRef);
+    if (!userSnapshot.exists()) {
+      throw new Error("User profile is missing.");
+    }
+
+    const safeCoinAmount = Number(Math.max(0, coinAmount).toFixed(2));
+    if (safeCoinAmount <= 0) {
+      throw new Error("Choose an amount greater than zero to sell.");
+    }
+
+    const marketSnapshot = await transaction.get(marketRef);
+    const currentMarket = marketSnapshot.exists() ? normalizeMarketState(marketSnapshot.data()) : createInitialCryptoMarketState();
+    const currentCoin = currentMarket.coins[coinId];
+    gemValue = getExecutedSellGemValue(currentCoin.currentValue, safeCoinAmount);
+
+    const currentHoldings = normalizeCoinHoldings((userSnapshot.data().coinHoldings ?? {}) as Partial<Record<CryptoCoinId, number>>);
+    const currentInvestmentTotals = normalizeCoinInvestmentTotals((userSnapshot.data().coinInvestmentTotals ?? {}) as Partial<Record<CryptoCoinId, number>>);
+    const currentCoinAmount = Number(currentHoldings[coinId] ?? 0);
+    if (currentCoinAmount < safeCoinAmount) {
+      throw new Error(`You only have ${currentCoinAmount} ${coinId} to sell.`);
+    }
+
+    const currentInvestment = Number(currentInvestmentTotals[coinId] ?? 0);
+    const soldCostBasis = currentCoinAmount <= 0 ? 0 : Number(((currentInvestment / currentCoinAmount) * safeCoinAmount).toFixed(2));
+    profit = Math.max(0, gemValue - soldCostBasis);
+    const nextValue = getNextTradePrice(currentCoin.currentValue, -1, gemValue);
+
+    transaction.update(userRef, {
+      gems: normalizeGemAmount(Number(userSnapshot.data().gems ?? 0) + gemValue),
+      coinHoldings: {
+        ...currentHoldings,
+        [coinId]: Number(Math.max(0, currentCoinAmount - safeCoinAmount).toFixed(2)),
+      },
+      coinInvestmentTotals: {
+        ...currentInvestmentTotals,
+        [coinId]: Number(Math.max(0, currentInvestment - soldCostBasis).toFixed(2)),
+      },
+      updatedAt: serverTimestamp(),
+    });
+
+    transaction.set(marketRef, {
+      lastUpdatedAt: Date.now(),
+      coins: {
+        ...currentMarket.coins,
+        [coinId]: {
+          currentValue: nextValue,
+          history: [...currentCoin.history.slice(-17), nextValue],
+        },
+      },
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  });
+
+  return { profit, gemValue };
 }
 
 export async function spendCasinoCoin(userId: string) {

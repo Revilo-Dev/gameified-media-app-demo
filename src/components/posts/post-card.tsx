@@ -9,6 +9,7 @@ import { Avatar } from "@/components/common/avatar";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { InlineEntities } from "@/components/common/inline-entities";
+import { TomatoIcon } from "@/components/common/tomato-icon";
 import { UserBadges } from "@/components/common/user-badges";
 import { getProfileBorderStyle } from "@/constants/profile-borders";
 import { setPostBookmarked, subscribeToBookmarkedPostIds } from "@/firebase/bookmarks";
@@ -20,16 +21,6 @@ import { ratePost, removePostEmbed, softDeletePost, subscribeToPostReactions, th
 import { getDemoUserById, getModeratorIds, subscribeToUserProfileById } from "@/firebase/users";
 import { getNameColorStyle } from "@/constants/name-colors";
 import type { Post, UserProfile } from "@/types/models";
-
-function TomatoIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path d="M12 6c4.4 0 8 3.3 8 7.4 0 4.2-3.6 7.6-8 7.6s-8-3.4-8-7.6C4 9.3 7.6 6 12 6Z" fill="currentColor" />
-      <path d="M9.2 5.8c.8-1.7 2-2.8 2.8-3 .8.2 2 1.3 2.8 3-1.3-.6-2-.8-2.8-.8s-1.5.2-2.8.8Z" fill="#6EBE4B" />
-      <path d="M12 6c1.5-1.4 3.3-2.1 5.4-2-1 1.8-2.2 2.8-3.5 3.2M12 6c-1.5-1.4-3.3-2.1-5.4-2 1 1.8 2.2 2.8 3.5 3.2" stroke="#6EBE4B" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 function formatPostTime(createdAt: string) {
   const parsedDate = new Date(createdAt);
@@ -73,6 +64,8 @@ export function PostCard({
     ? getProfileBorderStyle(author.equippedProfileBorderId)
     : null;
   const imageUrls = (post.imageUrls?.length ? post.imageUrls : post.imageURL ? [post.imageURL] : []).slice(0, 3);
+  const tomatoDamageLevel = Math.min(3, post.rottenTomatoCount);
+  const hasTomatoDamage = tomatoDamageLevel > 0;
 
   useEffect(() => {
     if (!user) {
@@ -191,7 +184,17 @@ export function PostCard({
 
   return (
     <div className={`rounded-3xl p-px ${post.parentPostId ? "" : "timeline-post-enter"}`} style={cardBorderStyle ?? undefined}>
-      <Card className="relative border border-border p-3 sm:p-4">
+      <Card className={`relative overflow-hidden border p-3 sm:p-4 ${hasTomatoDamage ? "border-red-500/35 bg-[radial-gradient(circle_at_top_left,rgba(239,68,68,0.18),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(127,29,29,0.16),transparent_42%)]" : "border-border"}`}>
+      {hasTomatoDamage ? (
+        <>
+          <div className={`pointer-events-none absolute -left-3 top-5 h-10 w-10 rounded-full bg-red-500/20 blur-md ${tomatoDamageLevel >= 2 ? "opacity-100" : "opacity-70"}`} />
+          <div className={`pointer-events-none absolute right-10 top-3 h-5 w-12 rotate-[-18deg] rounded-full bg-red-600/20 blur-sm ${tomatoDamageLevel >= 3 ? "opacity-100" : "opacity-60"}`} />
+          <div className="pointer-events-none absolute bottom-4 right-4 inline-flex items-center gap-1 rounded-full border border-red-400/25 bg-red-500/10 px-2 py-1 text-[11px] font-semibold text-red-200">
+            <TomatoIcon className="h-3.5 w-3.5" />
+            {post.rottenTomatoCount} hit{post.rottenTomatoCount === 1 ? "" : "s"}
+          </div>
+        </>
+      ) : null}
       <div className="flex gap-3">
         <Avatar
           name={author?.displayName ?? "Unknown"}

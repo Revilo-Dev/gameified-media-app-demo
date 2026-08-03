@@ -99,6 +99,7 @@ export async function ensureUserProfile(user: User) {
     badgeCount: 0,
     joinedAt: new Date().toISOString(),
     lastOnlineAt: new Date().toISOString(),
+    timeoutUntil: null,
   };
 
   await setDoc(ref, {
@@ -168,7 +169,7 @@ export async function addGemsToUser(userId: string, gemDelta: number) {
     }
 
     const currentGems = Number(snapshot.data().gems ?? 0);
-    const nextGems = Math.max(0, currentGems + gemDelta);
+    const nextGems = Number(Math.max(0, currentGems + gemDelta).toFixed(2));
 
     transaction.update(ref, {
       gems: nextGems,
@@ -229,7 +230,7 @@ export async function investGemsInCoin(userId: string, coinId: CryptoCoinId, gem
       return;
     }
 
-    const safeGemCost = Math.max(1, Math.floor(gemCost));
+    const safeGemCost = Number(Math.max(0.01, gemCost).toFixed(2));
     const safeCoinAmount = Number(coinAmount.toFixed(6));
     const currentGems = Number(snapshot.data().gems ?? 0);
     if (currentGems < safeGemCost) {
@@ -280,7 +281,7 @@ export async function sellCoinForGems(userId: string, coinId: CryptoCoinId, coin
     profit = Math.max(0, gemValue - soldCostBasis);
 
     transaction.update(ref, {
-      gems: Number(snapshot.data().gems ?? 0) + gemValue,
+      gems: Number((Number(snapshot.data().gems ?? 0) + gemValue).toFixed(2)),
       coinHoldings: {
         ...currentHoldings,
         [coinId]: Number(Math.max(0, currentCoinAmount - coinAmount).toFixed(6)),
@@ -341,7 +342,7 @@ export function subscribeToXpLeaderboard(onChange: (users: UserProfile[]) => voi
   });
 }
 
-export function subscribeToUserLeaderboard(field: "level" | "gems" | "postCount", onChange: (users: UserProfile[]) => void): Unsubscribe {
+export function subscribeToUserLeaderboard(field: "level" | "gems" | "postCount" | "followerCount", onChange: (users: UserProfile[]) => void): Unsubscribe {
   const leaderboardQuery = query(collection(db, COLLECTIONS.users), orderBy(field, "desc"), limit(50));
 
   return onSnapshot(leaderboardQuery, (snapshot) => {

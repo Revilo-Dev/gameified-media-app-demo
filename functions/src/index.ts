@@ -233,9 +233,28 @@ export const resetAllCrypto = onCall(async (request) => {
         nebula: 0,
         spark: 0,
       },
+      coinInvestmentTotals: {
+        wutax: 0,
+        galaxy: 0,
+        arc: 0,
+        nebula: 0,
+        spark: 0,
+      },
       updatedAt: FieldValue.serverTimestamp(),
     });
   }
+
+  await db.collection("markets").doc("global").set({
+    lastUpdatedAt: Date.now(),
+    coins: {
+      wutax: { currentValue: 1.12, history: [0.82, 0.85, 0.9, 0.88, 0.93, 0.95, 0.99, 1.02, 1.05, 1.01, 1.04, 1.08, 1.06, 1.03, 1.07, 1.1, 1.09, 1.12] },
+      galaxy: { currentValue: 2.38, history: [1.74, 1.8, 1.86, 1.9, 1.95, 1.99, 2.03, 2.08, 2.12, 2.1, 2.15, 2.2, 2.24, 2.29, 2.26, 2.31, 2.35, 2.38] },
+      arc: { currentValue: 0.84, history: [0.69, 0.71, 0.74, 0.72, 0.76, 0.78, 0.8, 0.77, 0.81, 0.83, 0.79, 0.82, 0.85, 0.81, 0.8, 0.78, 0.82, 0.84] },
+      nebula: { currentValue: 1.64, history: [1.28, 1.31, 1.35, 1.39, 1.42, 1.45, 1.49, 1.52, 1.56, 1.54, 1.58, 1.61, 1.59, 1.57, 1.6, 1.62, 1.63, 1.64] },
+      spark: { currentValue: 0.52, history: [0.36, 0.38, 0.4, 0.41, 0.43, 0.44, 0.46, 0.45, 0.47, 0.48, 0.49, 0.47, 0.48, 0.5, 0.49, 0.51, 0.5, 0.52] },
+    },
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
 
   return { ok: true };
 });

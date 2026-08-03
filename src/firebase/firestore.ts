@@ -1,5 +1,6 @@
 export const COLLECTIONS = {
   users: "users",
+  markets: "markets",
   posts: "posts",
   reactions: "reactions",
   follows: "follows",

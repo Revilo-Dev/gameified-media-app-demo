@@ -15,7 +15,7 @@ export function Avatar({ name, src, className, borderId }: AvatarProps) {
     return (
       <div className="inline-flex rounded-[1.1rem] p-[3px]" style={borderOptionStyle}>
         {src ? (
-          <img src={src} alt={name} className={cn("h-11 w-11 rounded-2xl object-cover bg-canvas", className)} />
+          <img src={src} alt={name} loading="eager" decoding="async" fetchPriority="high" className={cn("h-11 w-11 rounded-2xl object-cover bg-canvas", className)} />
         ) : (
           <div className={cn("flex h-11 w-11 items-center justify-center rounded-2xl bg-surfaceAlt text-sm font-bold", className)}>
             {name.slice(0, 2).toUpperCase()}
@@ -26,7 +26,7 @@ export function Avatar({ name, src, className, borderId }: AvatarProps) {
   }
 
   if (src) {
-    return <img src={src} alt={name} className={cn("h-11 w-11 rounded-2xl object-cover", className)} />;
+    return <img src={src} alt={name} loading="eager" decoding="async" fetchPriority="high" className={cn("h-11 w-11 rounded-2xl object-cover", className)} />;
   }
 
   return (

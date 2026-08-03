@@ -50,6 +50,12 @@ function normalizePost(document: { id: string; data: () => Record<string, unknow
     isDeleted: Boolean(data.isDeleted),
     imageURL: typeof data.imageURL === "string" ? data.imageURL : null,
     imageStoragePath: typeof data.imageStoragePath === "string" ? data.imageStoragePath : null,
+    imageUrls: Array.isArray(data.imageUrls)
+      ? data.imageUrls.map(String).slice(0, 3)
+      : (typeof data.imageURL === "string" && data.imageURL ? [data.imageURL] : []),
+    imageStoragePaths: Array.isArray(data.imageStoragePaths)
+      ? data.imageStoragePaths.map(String).slice(0, 3)
+      : (typeof data.imageStoragePath === "string" && data.imageStoragePath ? [data.imageStoragePath] : []),
     gifURL: typeof data.gifURL === "string" ? data.gifURL : null,
     parentPostId: typeof data.parentPostId === "string" ? data.parentPostId : null,
     repostedPostId: typeof data.repostedPostId === "string" ? data.repostedPostId : null,
@@ -124,6 +130,8 @@ export async function createPost(input: CreatePostInput) {
     gifURL: input.gifURL ?? null,
     imageURL: input.imageURL ?? null,
     imageStoragePath: input.imageStoragePath ?? null,
+    imageUrls: input.imageUrls?.slice(0, 3) ?? (input.imageURL ? [input.imageURL] : []),
+    imageStoragePaths: input.imageStoragePaths?.slice(0, 3) ?? (input.imageStoragePath ? [input.imageStoragePath] : []),
     parentPostId: input.parentPostId ?? null,
     repostedPostId: input.repostedPostId ?? null,
     quotedPostId: input.quotedPostId ?? null,
@@ -265,6 +273,8 @@ export async function softDeletePost(postId: string) {
     isDeleted: true,
     imageURL: null,
     imageStoragePath: null,
+    imageUrls: [],
+    imageStoragePaths: [],
     gifURL: null,
     poll: null,
     updatedAt: serverTimestamp(),
@@ -292,6 +302,7 @@ export async function throwRottenTomato(postId: string, user: UserProfile) {
   const postRef = doc(db, COLLECTIONS.posts, postId);
   let shouldDelete = false;
   let authorId: string | null = null;
+  let usedPremiumFreebie = false;
 
   await runTransaction(db, async (transaction) => {
     const [postSnapshot, reactionSnapshot, userSnapshot] = await Promise.all([
@@ -312,9 +323,12 @@ export async function throwRottenTomato(postId: string, user: UserProfile) {
       throw new Error("You already threw a rotten tomato at this post.");
     }
 
+    const isPremium = Boolean(userSnapshot.data().isPremium);
+    const tomatoCost = isPremium ? 0 : 25;
+    usedPremiumFreebie = isPremium;
     const currentGems = Number(userSnapshot.data().gems ?? 0);
-    if (currentGems < 5) {
-      throw new Error("You need 5 gems to throw a rotten tomato.");
+    if (currentGems < tomatoCost) {
+      throw new Error(`You need ${tomatoCost} gems to throw a rotten tomato.`);
     }
 
     authorId = String(postSnapshot.data().authorId ?? "");
@@ -328,7 +342,7 @@ export async function throwRottenTomato(postId: string, user: UserProfile) {
       createdAt: serverTimestamp(),
     });
     transaction.update(doc(db, COLLECTIONS.users, user.uid), {
-      gems: currentGems - 5,
+      gems: currentGems - tomatoCost,
       updatedAt: serverTimestamp(),
     });
     transaction.update(postRef, {
@@ -346,7 +360,7 @@ export async function throwRottenTomato(postId: string, user: UserProfile) {
     await createNotification({
       type: "reaction",
       title: "A rotten tomato hit your post",
-      body: "Someone spent 5 gems to throw a rotten tomato at your post.",
+      body: usedPremiumFreebie ? "A premium user threw a free rotten tomato at your post." : "Someone spent 25 gems to throw a rotten tomato at your post.",
       actorId: null,
       userId: authorId,
       postId,
@@ -379,10 +393,15 @@ export async function removePostEmbed(postId: string) {
   }
 
   const data = snapshot.data();
-  await deleteStorageObject(typeof data.imageStoragePath === "string" ? data.imageStoragePath : null);
+  const imageStoragePaths = Array.isArray(data.imageStoragePaths)
+    ? data.imageStoragePaths.filter((value): value is string => typeof value === "string")
+    : [typeof data.imageStoragePath === "string" ? data.imageStoragePath : null].filter((value): value is string => Boolean(value));
+  await Promise.all(imageStoragePaths.map((storagePath) => deleteStorageObject(storagePath)));
   await updateDoc(postRef, {
     imageURL: null,
     imageStoragePath: null,
+    imageUrls: [],
+    imageStoragePaths: [],
     gifURL: null,
     poll: null,
   });
@@ -423,7 +442,10 @@ async function deletePostArtifacts(postId: string) {
 
   for (const replyDocument of nestedReplies) {
     const replyData = replyDocument.data();
-    await deleteStorageObject(typeof replyData.imageStoragePath === "string" ? replyData.imageStoragePath : null);
+    const replyStoragePaths = Array.isArray(replyData.imageStoragePaths)
+      ? replyData.imageStoragePaths.filter((value): value is string => typeof value === "string")
+      : [typeof replyData.imageStoragePath === "string" ? replyData.imageStoragePath : null].filter((value): value is string => Boolean(value));
+    await Promise.all(replyStoragePaths.map((storagePath) => deleteStorageObject(storagePath)));
   }
 }
 
@@ -439,7 +461,9 @@ export async function deletePostCascade(postId: string) {
   const authorId = String(data.authorId ?? "");
   const parentPostId = typeof data.parentPostId === "string" ? data.parentPostId : null;
   const replyToPostId = typeof data.replyToPostId === "string" ? data.replyToPostId : null;
-  const imageStoragePath = typeof data.imageStoragePath === "string" ? data.imageStoragePath : null;
+  const imageStoragePaths = Array.isArray(data.imageStoragePaths)
+    ? data.imageStoragePaths.filter((value): value is string => typeof value === "string")
+    : [typeof data.imageStoragePath === "string" ? data.imageStoragePath : null].filter((value): value is string => Boolean(value));
 
   if (parentPostId) {
     const threadedChildrenSnapshot = await getDocs(query(collection(db, COLLECTIONS.posts), where("replyToPostId", "==", postId)));
@@ -450,7 +474,7 @@ export async function deletePostCascade(postId: string) {
 
   await deletePostArtifacts(postId);
   await deleteDoc(postRef);
-  await deleteStorageObject(imageStoragePath);
+  await Promise.all(imageStoragePaths.map((storagePath) => deleteStorageObject(storagePath)));
 
   if (authorId) {
     await updateDoc(doc(db, COLLECTIONS.users, authorId), {

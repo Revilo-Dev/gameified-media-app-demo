@@ -9,7 +9,7 @@ export const signupSchema = z
       .string()
       .trim()
       .min(2)
-      .max(32)
+      .max(25)
       .regex(baseDisplayNamePattern, "Display name may only use letters, numbers, and spaces"),
     handle: z
       .string()

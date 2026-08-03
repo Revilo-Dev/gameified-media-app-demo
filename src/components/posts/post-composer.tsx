@@ -89,7 +89,7 @@ export function PostComposer({
   const navigate = useNavigate();
   const { user } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [pendingImage, setPendingImage] = useState<{ url: string; storagePath: string } | null>(null);
+  const [pendingImages, setPendingImages] = useState<Array<{ url: string; storagePath: string }>>([]);
   const [pendingGifURL, setPendingGifURL] = useState<string | null>(null);
   const [pollEnabled, setPollEnabled] = useState(false);
   const [mediaMenuOpen, setMediaMenuOpen] = useState(false);
@@ -106,9 +106,11 @@ export function PostComposer({
   });
 
   const content = form.watch("content");
+  const timeoutUntil = profile?.timeoutUntil ? new Date(profile.timeoutUntil) : null;
+  const isTimedOut = Boolean(timeoutUntil && !Number.isNaN(timeoutUntil.getTime()) && timeoutUntil.getTime() > Date.now());
   const attachmentLabel = useMemo(() => {
-    if (pendingImage) {
-      return "Image attached";
+    if (pendingImages.length) {
+      return `${pendingImages.length} image${pendingImages.length === 1 ? "" : "s"} attached`;
     }
     if (pendingGifURL) {
       return "GIF attached";
@@ -117,7 +119,7 @@ export function PostComposer({
       return "Poll attached";
     }
     return "Add media";
-  }, [pendingGifURL, pendingImage, pollEnabled]);
+  }, [pendingGifURL, pendingImages, pollEnabled]);
 
   useEffect(() => {
     if (!user) {
@@ -142,6 +144,24 @@ export function PostComposer({
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [mediaMenuOpen]);
+
+  async function appendImages(files: File[]) {
+    if (!files.length) {
+      return;
+    }
+
+    const remainingSlots = Math.max(0, 3 - pendingImages.length);
+    if (!remainingSlots) {
+      toast.error("You can attach up to 3 images per post.");
+      return;
+    }
+
+    const nextFiles = files.slice(0, remainingSlots);
+    const uploadedImages = await Promise.all(nextFiles.map((file) => uploadPostImage(file)));
+    setPendingGifURL(null);
+    setPollEnabled(false);
+    setPendingImages((current) => [...current, ...uploadedImages].slice(0, 3));
+  }
 
   async function notifyMentions(contentValue: string, postId: string) {
     if (!user || !profile) {
@@ -194,6 +214,11 @@ export function PostComposer({
       return;
     }
 
+    if (isTimedOut) {
+      toast.error(`You are timed out until ${timeoutUntil?.toLocaleString()}.`);
+      return;
+    }
+
     const now = new Date();
     const lastPostedAtRaw = window.localStorage.getItem(storageKey);
     const lastPostedAt = lastPostedAtRaw ? new Date(lastPostedAtRaw) : null;
@@ -207,8 +232,10 @@ export function PostComposer({
     const payload = {
       authorId: user.uid,
       content: values.content.trim(),
-      imageURL: pendingImage?.url ?? null,
-      imageStoragePath: pendingImage?.storagePath ?? null,
+      imageURL: pendingImages[0]?.url ?? null,
+      imageStoragePath: pendingImages[0]?.storagePath ?? null,
+      imageUrls: pendingImages.map((image) => image.url),
+      imageStoragePaths: pendingImages.map((image) => image.storagePath),
       gifURL: pendingGifURL ?? null,
       parentPostId: parentPost?.id ?? null,
       repostedPostId: null,
@@ -256,7 +283,7 @@ export function PostComposer({
 
     await notifyMentions(values.content, created.id);
     form.reset();
-    setPendingImage(null);
+    setPendingImages([]);
     setPendingGifURL(null);
     setPollEnabled(false);
     setGifQuery("");
@@ -287,6 +314,20 @@ export function PostComposer({
               <textarea
                 {...form.register("content")}
                 placeholder={isReply ? "Write a reply..." : "Share a something..."}
+                disabled={isTimedOut}
+                onPaste={async (event) => {
+                  const imageFiles = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+                  if (!imageFiles.length) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  try {
+                    await appendImages(imageFiles);
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "Unable to attach pasted image");
+                  }
+                }}
                 className="min-h-28 w-full resize-none bg-transparent px-4 pb-12 pt-4 text-sm text-text outline-none placeholder:text-textMuted"
               />
               <div className="absolute inset-x-0 bottom-0 flex items-center justify-between px-3 py-2">
@@ -319,7 +360,7 @@ export function PostComposer({
                         type="button"
                         className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-surfaceAlt"
                         onClick={() => {
-                          setPendingImage(null);
+                          setPendingImages([]);
                           setPollEnabled(false);
                           setPendingGifURL("");
                           setMediaMenuOpen(false);
@@ -333,7 +374,7 @@ export function PostComposer({
                           type="button"
                           className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-surfaceAlt"
                           onClick={() => {
-                            setPendingImage(null);
+                            setPendingImages([]);
                             setPendingGifURL(null);
                             setPollEnabled(true);
                             setMediaMenuOpen(false);
@@ -348,13 +389,14 @@ export function PostComposer({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-textMuted">{content.length}/300</span>
-                  <Button type="submit" size="sm" disabled={form.formState.isSubmitting || !content.trim()} className="gap-2">
+                  <Button type="submit" size="sm" disabled={isTimedOut || form.formState.isSubmitting || !content.trim()} className="gap-2">
                     <Send size={14} />
-                    {isReply ? "Reply" : "Post"}
+                    {isTimedOut ? "Timed out" : isReply ? "Reply" : "Post"}
                   </Button>
                 </div>
               </div>
             </div>
+            {isTimedOut ? <p className="mt-2 text-xs text-red-300">Posting is disabled until {timeoutUntil?.toLocaleString()}.</p> : null}
           </div>
         </div>
 
@@ -364,27 +406,35 @@ export function PostComposer({
           accept="image/*"
           className="hidden"
           onChange={async (event) => {
-            const file = event.target.files?.[0];
-            if (!file) {
+            const files = Array.from(event.target.files ?? []);
+            if (!files.length) {
               return;
             }
 
             try {
-              setPendingGifURL(null);
-              setPollEnabled(false);
-              setPendingImage(await uploadPostImage(file));
+              await appendImages(files);
+              event.currentTarget.value = "";
             } catch (error) {
               toast.error(error instanceof Error ? error.message : "Unable to upload image");
             }
           }}
+          multiple
         />
 
-        {pendingImage ? (
-          <div className="relative overflow-hidden rounded-3xl border border-border">
-            <img src={pendingImage.url} alt="Selected upload" className="max-h-72 w-full object-cover" />
-            <button type="button" className="absolute right-3 top-3 rounded-full bg-canvas/90 p-2" onClick={() => setPendingImage(null)}>
-              <X size={14} />
-            </button>
+        {pendingImages.length ? (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {pendingImages.map((image, index) => (
+              <div key={image.storagePath} className="relative overflow-hidden rounded-3xl border border-border">
+                <img src={image.url} alt={`Selected upload ${index + 1}`} className="max-h-64 w-full object-cover" />
+                <button
+                  type="button"
+                  className="absolute right-3 top-3 rounded-full bg-canvas/90 p-2"
+                  onClick={() => setPendingImages((current) => current.filter((item) => item.storagePath !== image.storagePath))}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
           </div>
         ) : null}
 

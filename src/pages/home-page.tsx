@@ -69,7 +69,7 @@ export function HomePage() {
           {isPostsLoading ? Array.from({ length: 3 }).map((_, index) => (
             <PostSkeleton key={`post-skeleton-${index}`} />
           )) : visiblePosts.map((post) => (
-              <PostCard key={post.id} post={post} />
+              <PostCard key={post.id} post={post} priority="high" />
             ))}
         </>
       ) : (

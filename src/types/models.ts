@@ -70,6 +70,7 @@ export interface UserProfile {
   badgeCount: number;
   joinedAt: string;
   lastOnlineAt?: string;
+  timeoutUntil?: string | null;
 }
 
 export interface Post {
@@ -79,6 +80,8 @@ export interface Post {
   isDeleted?: boolean;
   imageURL: string | null;
   imageStoragePath: string | null;
+  imageUrls?: string[];
+  imageStoragePaths?: string[];
   gifURL: string | null;
   parentPostId: string | null;
   repostedPostId: string | null;

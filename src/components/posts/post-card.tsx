@@ -10,6 +10,7 @@ import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { InlineEntities } from "@/components/common/inline-entities";
 import { UserBadges } from "@/components/common/user-badges";
+import { getProfileBorderStyle } from "@/constants/profile-borders";
 import { setPostBookmarked, subscribeToBookmarkedPostIds } from "@/firebase/bookmarks";
 import { db } from "@/firebase/config";
 import { setFollowingRelationship, subscribeToFollowRelationship } from "@/firebase/follows";
@@ -43,10 +44,12 @@ export function PostCard({
   post,
   replyContextLabel,
   onReply,
+  priority = "normal",
 }: {
   post: Post;
   replyContextLabel?: string | null;
   onReply?: (() => void) | null;
+  priority?: "normal" | "high";
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -66,6 +69,10 @@ export function PostCard({
   const canDeletePost = Boolean(currentUserProfile && (currentUserProfile.uid === post.authorId || currentUserProfile.isModerator));
   const canDeleteEmbed = Boolean(currentUserProfile?.isModerator && (post.imageURL || post.gifURL || post.poll));
   const profilePath = author ? `/profile/${author.handle}` : "/";
+  const cardBorderStyle = author?.equippedProfileBorderId && author.equippedProfileBorderId !== "border-none"
+    ? getProfileBorderStyle(author.equippedProfileBorderId)
+    : null;
+  const imageUrls = (post.imageUrls?.length ? post.imageUrls : post.imageURL ? [post.imageURL] : []).slice(0, 3);
 
   useEffect(() => {
     if (!user) {
@@ -183,7 +190,8 @@ export function PostCard({
   }
 
   return (
-    <Card className="relative p-3 sm:p-4">
+    <div className={`rounded-3xl p-px ${post.parentPostId ? "" : "timeline-post-enter"}`} style={cardBorderStyle ?? undefined}>
+      <Card className="relative border border-border p-3 sm:p-4">
       <div className="flex gap-3">
         <Avatar
           name={author?.displayName ?? "Unknown"}
@@ -333,8 +341,22 @@ export function PostCard({
             </p>
           </button>
 
-          {post.gifURL ? <img src={post.gifURL} alt="Attached GIF" className="max-h-[20rem] w-full rounded-3xl border border-border object-cover" /> : null}
-          {post.imageURL ? <img src={post.imageURL} alt="Post attachment" className="max-h-[20rem] w-full rounded-3xl border border-border object-cover" /> : null}
+          {post.gifURL ? <img src={post.gifURL} alt="Attached GIF" loading="eager" decoding="async" fetchPriority={priority === "high" ? "high" : "auto"} className="max-h-[20rem] w-full rounded-3xl border border-border object-cover" /> : null}
+          {imageUrls.length ? (
+            <div className={`grid gap-3 ${imageUrls.length === 1 ? "grid-cols-1" : imageUrls.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
+              {imageUrls.map((imageUrl, index) => (
+                <img
+                  key={`${post.id}-image-${index}`}
+                  src={imageUrl}
+                  alt={`Post attachment ${index + 1}`}
+                  loading="eager"
+                  decoding="async"
+                  fetchPriority={priority === "high" ? "high" : "auto"}
+                  className="max-h-72 w-full rounded-3xl border border-border object-cover"
+                />
+              ))}
+            </div>
+          ) : null}
 
           {poll ? (
             <div className="space-y-3 rounded-3xl border border-border bg-surfaceAlt/30 p-4">
@@ -401,7 +423,7 @@ export function PostCard({
               size="sm"
               disabled={submittingRottenTomato || hasThrownRottenTomato}
               className={`gap-2 ${hasThrownRottenTomato ? "text-red-500" : "text-textMuted hover:text-red-500"}`}
-              title={hasThrownRottenTomato ? "You already threw a rotten tomato" : "Costs 5 gems"}
+              title={hasThrownRottenTomato ? "You already threw a rotten tomato" : currentUserProfile?.isPremium ? "Free with premium" : "Costs 25 gems"}
               onClick={() => void handleRottenTomato()}
             >
               <TomatoIcon className="h-4 w-4" />
@@ -436,6 +458,7 @@ export function PostCard({
           </div>
         </div>
       </div>
-    </Card>
+      </Card>
+    </div>
   );
 }

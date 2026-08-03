@@ -135,3 +135,22 @@ body {
     background-position: 0% 50%;
   }
 }
+
+.timeline-post-enter {
+  animation: timeline-post-enter 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform-origin: top center;
+}
+
+@keyframes timeline-post-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+    filter: saturate(0.9);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: saturate(1);
+  }
+}

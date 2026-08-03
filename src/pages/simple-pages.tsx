@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Bell, ChevronDown, ChevronUp, CircleDollarSign, Clock3, Crown, Gem, Globe2, Hammer, ImagePlus, Lock, MapPin, MessageCircle, Palette, Search, Send, Sparkles, Star, Trash2, TriangleAlert, Unlock, UserPlus } from "lucide-react";
+import { Bell, Check, ChevronDown, ChevronUp, CircleDollarSign, Clock3, Crown, Gem, Globe2, Hammer, ImagePlus, Lock, MapPin, MessageCircle, Orbit, Palette, Search, Send, Sparkles, Star, Trash2, TriangleAlert, Unlock, UserPlus, Zap } from "lucide-react";
 import { deleteDoc, doc, increment, updateDoc } from "firebase/firestore";
 import { auth, db } from "@/firebase/config";
 import { Card } from "@/components/common/card";
@@ -31,6 +31,7 @@ import { PROFILE_BORDER_OPTIONS, getProfileBorderStyle } from "@/constants/profi
 import { themePresets } from "@/lib/theme-presets";
 import { readCache, writeCache } from "@/lib/persistent-cache";
 import { banUserAccount, resetAllCrypto, resetAllGems } from "@/firebase/functions";
+import { createInitialCryptoMarketState, moderateCryptoMarket, subscribeToCryptoMarket, type CryptoMarketState, updateCryptoMarketForTrade } from "@/firebase/crypto-market";
 import { subscribeToBookmarkedPosts } from "@/firebase/bookmarks";
 import { markAllNotificationsRead, markNotificationRead, subscribeToNotifications } from "@/firebase/notifications";
 import { UserBadges } from "@/components/common/user-badges";
@@ -100,6 +101,35 @@ function formatLastOnline(lastOnlineAt?: string) {
   }
   const diffDays = Math.floor(diffHours / 24);
   return `Last online ${diffDays}d ago`;
+}
+
+function getTimeoutRemainingLabel(timeoutUntil?: string | null) {
+  if (!timeoutUntil) {
+    return null;
+  }
+
+  const timeoutDate = new Date(timeoutUntil);
+  if (Number.isNaN(timeoutDate.getTime()) || timeoutDate.getTime() <= Date.now()) {
+    return null;
+  }
+
+  const remainingMs = timeoutDate.getTime() - Date.now();
+  const remainingHours = Math.floor(remainingMs / (60 * 60 * 1000));
+  const remainingDays = Math.floor(remainingHours / 24);
+
+  if (remainingDays >= 7) {
+    return `${Math.floor(remainingDays / 7)}w remaining`;
+  }
+
+  if (remainingDays >= 1) {
+    return `${remainingDays}d remaining`;
+  }
+
+  if (remainingHours >= 1) {
+    return `${remainingHours}h remaining`;
+  }
+
+  return `${Math.max(1, Math.floor(remainingMs / 60000))}m remaining`;
 }
 
 function getNotificationVisual(type: NotificationItem["type"]) {
@@ -185,10 +215,10 @@ const loginSchema = z.object({
 });
 
 const signupSchema = loginSchema.extend({
-  displayName: z.string().min(2).max(40),
+  displayName: z.string().min(2).max(25),
 });
 
-const DISPLAY_NAME_MAX_LENGTH = 32;
+const DISPLAY_NAME_MAX_LENGTH = 25;
 const HANDLE_MAX_LENGTH = 20;
 const BIO_MAX_LENGTH = 180;
 const LOCATION_MAX_LENGTH = 60;
@@ -274,6 +304,7 @@ export function ExplorePage() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [queryText, setQueryText] = useState("");
+  const [feedSort, setFeedSort] = useState<"recent" | "stars" | "comments">("recent");
 
   useEffect(() => subscribeToPosts(setPosts), []);
   useEffect(() => subscribeToUserProfiles(setProfiles), []);
@@ -283,7 +314,7 @@ export function ExplorePage() {
   const postLookup = useMemo(() => new Map(posts.map((post) => [post.id, post])), [posts]);
   const filteredPosts = useMemo(() => {
     if (!queryTokens.length) {
-      return posts;
+      return [...posts];
     }
 
     return posts.filter((post) => {
@@ -291,6 +322,19 @@ export function ExplorePage() {
       return queryTokens.every((token) => haystack.includes(token));
     });
   }, [posts, queryTokens]);
+  const sortedPosts = useMemo(() => {
+    const nextPosts = [...filteredPosts];
+
+    if (feedSort === "stars") {
+      return nextPosts.sort((left, right) => right.starRatingCount - left.starRatingCount || right.averageRating - left.averageRating);
+    }
+
+    if (feedSort === "comments") {
+      return nextPosts.sort((left, right) => right.replyCount - left.replyCount || new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+    }
+
+    return nextPosts.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+  }, [feedSort, filteredPosts]);
   const filteredProfiles = useMemo(() => {
     if (!queryTokens.length) {
       return profiles.slice(0, 8);
@@ -367,6 +411,22 @@ export function ExplorePage() {
       </Card>
 
       <Card className="space-y-4 p-5">
+        <div className="flex flex-wrap gap-2">
+          {[
+            { id: "recent", label: "Recent" },
+            { id: "stars", label: "Most stars" },
+            { id: "comments", label: "Most comments" },
+          ].map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setFeedSort(option.id as typeof feedSort)}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${feedSort === option.id ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="font-semibold">People</p>
@@ -398,11 +458,12 @@ export function ExplorePage() {
       </Card>
 
       <div className="space-y-4">
-        {filteredPosts.length ? filteredPosts.map((post) => (
+        {sortedPosts.length ? sortedPosts.map((post, index) => (
           <PostCard
             key={post.id}
             post={post}
             replyContextLabel={replyContextLabels[post.id]}
+            priority={index < 3 ? "high" : "normal"}
           />
         )) : (
           <Card className="p-6 text-sm text-textMuted">No posts matched that search yet.</Card>
@@ -432,6 +493,9 @@ export function ProfilePage() {
   const [followerIds, setFollowerIds] = useState<string[]>([]);
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [followProfiles, setFollowProfiles] = useState<Record<string, UserProfile | null>>({});
+  const [isEditingGems, setIsEditingGems] = useState(false);
+  const [gemInput, setGemInput] = useState("");
+  const [market, setMarket] = useState<CryptoMarketState>(() => createInitialCryptoMarketState());
 
   useEffect(() => {
     if (!handle) {
@@ -567,6 +631,8 @@ export function ProfilePage() {
     () => visibleFollowIds.map((profileId) => followProfiles[profileId]).filter((profile): profile is UserProfile => Boolean(profile)),
     [followProfiles, visibleFollowIds],
   );
+  const timeoutLabel = getTimeoutRemainingLabel(user?.timeoutUntil);
+  const canModerateGems = Boolean(user && currentUserId && currentUserId !== user.uid);
 
   if (!user) {
     return (
@@ -578,7 +644,8 @@ export function ProfilePage() {
 
   return (
     <div className="space-y-5">
-      <Card className="overflow-hidden p-0">
+      <div className="rounded-3xl p-px" style={user.equippedProfileBorderId && user.equippedProfileBorderId !== "border-none" ? getProfileBorderStyle(user.equippedProfileBorderId) : undefined}>
+      <Card className="overflow-hidden border border-border p-0">
         <div className="h-36 w-full sm:h-44" style={formatBannerStyle(user)} />
         <div className="space-y-4 p-5 sm:p-6">
           <div className="flex flex-col gap-4">
@@ -588,7 +655,6 @@ export function ProfilePage() {
                   name={user.displayName}
                   src={user.photoURL}
                   className="h-20 w-20 rounded-3xl sm:h-24 sm:w-24"
-                  borderId={user.equippedProfileBorderId}
                 />
               </div>
               <div className="min-w-0 flex-1 pb-1">
@@ -622,6 +688,7 @@ export function ProfilePage() {
                     >
                       {isOwnProfile ? "Edit profile" : isTogglingFollow ? "Saving..." : isFollowing ? "Following" : "Follow"}
                     </Button>
+                    {currentUserId && !isOwnProfile ? <ModeratorTimeoutButton targetUserId={user.uid} /> : null}
                     {currentUserId && !isOwnProfile ? <ModeratorBanButton targetUserId={user.uid} /> : null}
                   </div>
                 </div>
@@ -640,9 +707,15 @@ export function ProfilePage() {
                       Private
                     </span>
                   ) : null}
+                  {timeoutLabel ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-red-400/40 bg-red-500/10 px-2 py-1 text-xs text-red-300">
+                      <Clock3 size={12} />
+                      Timed out: {timeoutLabel}
+                    </span>
+                  ) : null}
                   <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-1 text-xs">
                     <Clock3 size={12} />
-                    {formatLastOnline(user.lastOnlineAt)}
+                    {user.isPremium && user.isPrivate ? "Last online hidden" : formatLastOnline(user.lastOnlineAt)}
                   </span>
                 </div>
               </div>
@@ -654,7 +727,53 @@ export function ProfilePage() {
               </div>
               <div className="rounded-2xl border border-border bg-surfaceAlt/50 px-3 py-2">
                 <p className="text-xs text-textMuted">Gems</p>
-                <p className="mt-1 inline-flex items-center gap-1 font-semibold"><Gem size={14} /> {user.gems}</p>
+                {isEditingGems ? (
+                  <div className="mt-2 space-y-2">
+                    <input
+                      type="number"
+                      value={gemInput}
+                      onChange={(event) => setGemInput(event.target.value)}
+                      className="w-full rounded-2xl border border-border bg-transparent px-3 py-2 text-sm outline-none"
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={async () => {
+                          const nextValue = Number(Math.max(0, Number(gemInput)).toFixed(2));
+                          if (!Number.isFinite(nextValue)) {
+                            toast.error("Enter a valid gem amount.");
+                            return;
+                          }
+
+                          try {
+                            await updateUserProfile(user.uid, { gems: nextValue });
+                            toast.success("Gems updated");
+                            setIsEditingGems(false);
+                          } catch (error) {
+                            toast.error(getFirebaseErrorMessage(error));
+                          }
+                        }}
+                      >
+                        Save
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => setIsEditingGems(false)}>Cancel</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className={`mt-1 inline-flex items-center gap-1 font-semibold ${canModerateGems ? "hover:text-[color:var(--accent)]" : ""}`}
+                    onClick={() => {
+                      if (!canModerateGems) {
+                        return;
+                      }
+                      setGemInput(String(user.gems));
+                      setIsEditingGems(true);
+                    }}
+                  >
+                    <Gem size={14} /> {user.gems.toFixed(2)}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -682,6 +801,7 @@ export function ProfilePage() {
           </div>
         </div>
       </Card>
+      </div>
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -714,14 +834,23 @@ export function ProfilePage() {
             <p>Only mutual follows can view this user&apos;s posts and replies.</p>
           </Card>
         ) : profileTab === "stats" ? (
-          <Card className="grid gap-3 p-5 md:grid-cols-2">
+          <Card className="space-y-4 p-5">
+            <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
               <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Gems</p>
-              <p className="mt-2 text-xl font-semibold tabular-nums">{user.gems}</p>
+              <p className="mt-2 text-xl font-semibold tabular-nums">{user.gems.toFixed(2)}</p>
             </div>
             <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
-              <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Coin holdings</p>
-              <p className="mt-2 text-xl font-semibold tabular-nums">{Object.values(user.coinHoldings ?? {}).reduce((sum, amount) => sum + amount, 0).toFixed(2)}</p>
+              <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Liquid value</p>
+              <p className="mt-2 text-xl font-semibold tabular-nums">{user.gems.toFixed(2)}</p>
+            </div>
+            <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
+              <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Illiquid value</p>
+              <p className="mt-2 text-xl font-semibold tabular-nums">{CRYPTO_COINS.reduce((sum, coin) => sum + ((user.coinHoldings?.[coin.id] ?? 0) * market.coins[coin.id].currentValue), 0).toFixed(2)}</p>
+            </div>
+            <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
+              <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Total net value</p>
+              <p className="mt-2 text-xl font-semibold tabular-nums">{(user.gems + CRYPTO_COINS.reduce((sum, coin) => sum + ((user.coinHoldings?.[coin.id] ?? 0) * market.coins[coin.id].currentValue), 0)).toFixed(2)}</p>
             </div>
             <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
               <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Gambling gains</p>
@@ -730,6 +859,22 @@ export function ProfilePage() {
             <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
               <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Gambling losses</p>
               <p className="mt-2 text-xl font-semibold tabular-nums text-rose-300">-{user.gamblingLosses ?? 0}</p>
+            </div>
+            </div>
+            <div className="rounded-2xl border border-border bg-surfaceAlt/35 p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Owned coins</p>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                {CRYPTO_COINS.filter((coin) => (user.coinHoldings?.[coin.id] ?? 0) > 0).length ? CRYPTO_COINS.filter((coin) => (user.coinHoldings?.[coin.id] ?? 0) > 0).map((coin) => (
+                  <div key={coin.id} className="rounded-2xl border border-border bg-surface px-3 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-semibold" style={{ color: coin.accent }}>{coin.shortLabel}</span>
+                      <span className="text-sm tabular-nums">{(user.coinHoldings?.[coin.id] ?? 0).toFixed(2)}</span>
+                    </div>
+                    <p className="mt-1 text-sm text-textMuted">{coin.name}</p>
+                    <p className="mt-2 text-sm font-semibold tabular-nums">{(((user.coinHoldings?.[coin.id] ?? 0) * market.coins[coin.id].currentValue)).toFixed(2)}</p>
+                  </div>
+                )) : <p className="text-sm text-textMuted">No coins owned yet.</p>}
+              </div>
             </div>
           </Card>
         ) : profileTab === "posts" ? (
@@ -1002,9 +1147,11 @@ function EditProfileModal({
                       value={handle}
                       onChange={(event) => setHandle(event.target.value.toLowerCase())}
                       maxLength={HANDLE_MAX_LENGTH}
+                      disabled={!profile.isPremium}
                       className="w-full rounded-2xl border border-border bg-transparent px-4 py-3 text-sm outline-none"
                     />
                     <p className="text-xs text-textMuted">{handle.length}/{HANDLE_MAX_LENGTH}</p>
+                    {!profile.isPremium ? <p className="text-xs text-textMuted">Premium is required to update your @ handle.</p> : null}
                   </div>
                   <div className="space-y-2">
                     <label className="block text-sm font-semibold">Location</label>
@@ -1103,7 +1250,7 @@ function EditProfileModal({
                         const nextLocation = location.trim();
 
                         if (!nextDisplayName || nextDisplayName.length > DISPLAY_NAME_MAX_LENGTH || !DISPLAY_NAME_PATTERN.test(nextDisplayName)) {
-                          throw new Error("Display name may only use letters, numbers, and spaces, and must be 1-32 characters.");
+                          throw new Error("Display name may only use letters, numbers, and spaces, and must be 1-25 characters.");
                         }
 
                         if (!nextHandle || nextHandle.length < 3 || nextHandle.length > HANDLE_MAX_LENGTH || !HANDLE_PATTERN.test(nextHandle)) {
@@ -1116,6 +1263,10 @@ function EditProfileModal({
 
                         if (nextLocation.length > LOCATION_MAX_LENGTH) {
                           throw new Error(`Location must be ${LOCATION_MAX_LENGTH} characters or fewer.`);
+                        }
+
+                        if (nextHandle !== profile.handle && !profile.isPremium) {
+                          throw new Error("Premium is required to update your @ handle.");
                         }
 
                         if (nextHandle !== profile.handle) {
@@ -1292,6 +1443,66 @@ function ModeratorBanButton({ targetUserId }: { targetUserId: string }) {
   );
 }
 
+const MODERATOR_TIMEOUT_OPTIONS = [
+  { label: "1h", durationMs: 60 * 60 * 1000 },
+  { label: "3h", durationMs: 3 * 60 * 60 * 1000 },
+  { label: "6h", durationMs: 6 * 60 * 60 * 1000 },
+  { label: "1d", durationMs: 24 * 60 * 60 * 1000 },
+  { label: "1w", durationMs: 7 * 24 * 60 * 60 * 1000 },
+] as const;
+
+function ModeratorTimeoutButton({ targetUserId }: { targetUserId: string }) {
+  const { user } = useAuth();
+  const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  useEffect(() => {
+    if (!user) {
+      setCurrentUserProfile(null);
+      return;
+    }
+
+    return subscribeToUserProfileById(user.uid, setCurrentUserProfile);
+  }, [user]);
+
+  if (!currentUserProfile?.isModerator) {
+    return null;
+  }
+
+  return (
+    <select
+      className="h-9 rounded-2xl border border-border bg-surface px-3 text-sm text-text"
+      defaultValue=""
+      disabled={isUpdating}
+      onChange={async (event) => {
+        const selected = MODERATOR_TIMEOUT_OPTIONS.find((option) => option.label === event.target.value);
+        event.currentTarget.value = "";
+        if (!selected) {
+          return;
+        }
+
+        setIsUpdating(true);
+        try {
+          await updateUserProfile(targetUserId, {
+            timeoutUntil: new Date(Date.now() + selected.durationMs).toISOString(),
+          });
+          toast.success("User timed out", { description: `${selected.label} applied.` });
+        } catch (error) {
+          console.error("Failed to time out user", error);
+          toast.error(getFirebaseErrorMessage(error));
+        } finally {
+          setIsUpdating(false);
+        }
+      }}
+    >
+      <option value="">Timeout</option>
+      {MODERATOR_TIMEOUT_OPTIONS.map((option) => (
+        <option key={option.label} value={option.label}>{option.label}</option>
+      ))}
+    </select>
+  );
+}
+
 export function PremiumPage() {
   return (
     <PageFrame title="Premium" subtitle="Upgrade to premium">
@@ -1302,8 +1513,8 @@ export function PremiumPage() {
               <Sparkles size={14} />
               Premium
             </div>
-            <h2 className="mt-4 max-w-xl text-3xl font-bold">Enjoy the benifits of premium, for just 1$ a month.</h2>
-            <p className="mt-3 max-w-2xl text-sm text-white/80">Premium unlocks tons of features and defs aint a scam</p>
+            <h2 className="mt-4 max-w-xl text-3xl font-bold">Premium perks that actually change how your account feels.</h2>
+            <p className="mt-3 max-w-2xl text-sm text-white/80">Cosmetics, extra rewards, stronger odds, and a few quality-of-life flexes in one cheap upgrade.</p>
           </div>
         </Card>
 
@@ -1311,24 +1522,45 @@ export function PremiumPage() {
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent)]">Premium</p>
             <h3 className="mt-2 text-2xl font-bold">$1 / month</h3>
-            <p className="mt-2 text-sm text-textMuted">Best value </p>
+            <p className="mt-2 text-sm text-textMuted">Best value</p>
           </div>
           <Button className="w-full gap-2">
             <Crown size={16} />
             Buy Premium
           </Button>
-                    <div>
+          <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent)]">Premium +</p>
             <h3 className="mt-2 text-2xl font-bold">$5 / month</h3>
-            <p className="mt-2 text-sm text-textMuted">Most Popular </p>
+            <p className="mt-2 text-sm text-textMuted">Most popular</p>
           </div>
           <Button className="w-full gap-2">
             <Crown size={16} />
-            Buy Premium
+            Buy Premium+
           </Button>
         </Card>
-        
       </div>
+
+      <Card className="p-6">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {[
+            "Verified checkmark",
+            "Banner headers",
+            "Increased daily rewards",
+            "5% market discount",
+            "+5% gambling odds",
+            "+150 daily gems",
+            "Hidden last online",
+            "Update @ handle",
+            "Animated pfp",
+            "Free rotten tomatoes",
+          ].map((benefit) => (
+            <div key={benefit} className="inline-flex items-center gap-2 rounded-2xl border border-border bg-surfaceAlt/30 px-4 py-3 text-sm">
+              <Check size={15} className="text-[color:var(--accent)]" />
+              {benefit}
+            </div>
+          ))}
+        </div>
+      </Card>
     </PageFrame>
   );
 }
@@ -2311,10 +2543,6 @@ export function MarketPage() {
   );
 }
 
-const CRYPTO_MARKET_KEY = "pulsearc-crypto-market";
-const CRYPTO_UPDATE_INTERVAL_MS = 10 * 60 * 1000;
-const CRYPTO_HISTORY_LENGTH = 18;
-const CRYPTO_INVESTMENT_OPTIONS = [10, 25, 50] as const;
 const CRYPTO_COINS: Array<{
   id: CryptoCoinId;
   name: string;
@@ -2322,93 +2550,20 @@ const CRYPTO_COINS: Array<{
   accent: string;
   cardTone: string;
   description: string;
+  icon: typeof Gem;
 }> = [
-  { id: "wutax", name: "Wutax Coin", shortLabel: "WTX", accent: "#f97316", cardTone: "from-orange-500/20 to-amber-500/10", description: "Volatile meme-energy momentum with sharp intraday swings." },
-  { id: "galaxy", name: "Galaxy Coin", shortLabel: "GLX", accent: "#60a5fa", cardTone: "from-sky-500/20 to-indigo-500/10", description: "Big-cap social token with steadier orbit-like movement." },
-  { id: "arc", name: "Arc", shortLabel: "ARC", accent: "#f472b6", cardTone: "from-pink-500/20 to-fuchsia-500/10", description: "Fast reaction coin with dramatic sentiment spikes." },
-  { id: "nebula", name: "Nebula Coin", shortLabel: "NEB", accent: "#a78bfa", cardTone: "from-violet-500/20 to-purple-500/10", description: "Cloudy mid-cap asset that drifts before snapping higher or lower." },
-  { id: "spark", name: "Spark", shortLabel: "SPK", accent: "#34d399", cardTone: "from-emerald-500/20 to-teal-500/10", description: "Utility-style coin with smaller but frequent moves." },
+  { id: "wutax", name: "Wutax Coin", shortLabel: "WTX", accent: "#f97316", cardTone: "from-orange-500/20 to-amber-500/10", description: "Volatile meme-energy momentum with sharp intraday swings.", icon: CircleDollarSign },
+  { id: "galaxy", name: "Galaxy Coin", shortLabel: "GLX", accent: "#60a5fa", cardTone: "from-sky-500/20 to-indigo-500/10", description: "Big-cap social token with steadier orbit-like movement.", icon: Orbit },
+  { id: "arc", name: "Arc", shortLabel: "ARC", accent: "#f472b6", cardTone: "from-pink-500/20 to-fuchsia-500/10", description: "Fast reaction coin with dramatic sentiment spikes.", icon: Zap },
+  { id: "nebula", name: "Nebula Coin", shortLabel: "NEB", accent: "#a78bfa", cardTone: "from-violet-500/20 to-purple-500/10", description: "Cloudy mid-cap asset that drifts before snapping higher or lower.", icon: Sparkles },
+  { id: "spark", name: "Spark", shortLabel: "SPK", accent: "#34d399", cardTone: "from-emerald-500/20 to-teal-500/10", description: "Utility-style coin with smaller but frequent moves.", icon: Star },
 ];
-
-type CryptoMarketState = {
-  lastUpdatedAt: number;
-  coins: Record<CryptoCoinId, { currentValue: number; history: number[] }>;
-};
-
-function createInitialCryptoMarketState(): CryptoMarketState {
-  return {
-    lastUpdatedAt: Date.now(),
-    coins: {
-      wutax: { currentValue: 1.12, history: [0.82, 0.85, 0.9, 0.88, 0.93, 0.95, 0.99, 1.02, 1.05, 1.01, 1.04, 1.08, 1.06, 1.03, 1.07, 1.1, 1.09, 1.12] },
-      galaxy: { currentValue: 2.38, history: [1.74, 1.8, 1.86, 1.9, 1.95, 1.99, 2.03, 2.08, 2.12, 2.1, 2.15, 2.2, 2.24, 2.29, 2.26, 2.31, 2.35, 2.38] },
-      arc: { currentValue: 0.84, history: [0.69, 0.71, 0.74, 0.72, 0.76, 0.78, 0.8, 0.77, 0.81, 0.83, 0.79, 0.82, 0.85, 0.81, 0.8, 0.78, 0.82, 0.84] },
-      nebula: { currentValue: 1.64, history: [1.28, 1.31, 1.35, 1.39, 1.42, 1.45, 1.49, 1.52, 1.56, 1.54, 1.58, 1.61, 1.59, 1.57, 1.6, 1.62, 1.63, 1.64] },
-      spark: { currentValue: 0.52, history: [0.36, 0.38, 0.4, 0.41, 0.43, 0.44, 0.46, 0.45, 0.47, 0.48, 0.49, 0.47, 0.48, 0.5, 0.49, 0.51, 0.5, 0.52] },
-    },
-  };
-}
-
-function getNextCoinValue(value: number) {
-  const delta = 1 + (Math.random() * 0.16 - 0.08);
-  return Math.max(0.1, Number((value * delta).toFixed(2)));
-}
-
-function rollCryptoMarket(previous: CryptoMarketState) {
-  const nextCoins = CRYPTO_COINS.reduce<CryptoMarketState["coins"]>((accumulator, coin) => {
-    const currentCoin = previous.coins[coin.id];
-    const nextValue = getNextCoinValue(currentCoin.currentValue);
-    accumulator[coin.id] = {
-      currentValue: nextValue,
-      history: [...currentCoin.history.slice(-(CRYPTO_HISTORY_LENGTH - 1)), nextValue],
-    };
-    return accumulator;
-  }, {} as CryptoMarketState["coins"]);
-
-  return {
-    lastUpdatedAt: Date.now(),
-    coins: nextCoins,
-  };
-}
-
-function getCryptoMarketState() {
-  const cached = readCache<CryptoMarketState>(CRYPTO_MARKET_KEY);
-  if (!cached) {
-    const initialState = createInitialCryptoMarketState();
-    writeCache(CRYPTO_MARKET_KEY, initialState);
-    return initialState;
-  }
-
-  if (Date.now() - cached.lastUpdatedAt >= CRYPTO_UPDATE_INTERVAL_MS) {
-    const nextState = rollCryptoMarket(cached);
-    writeCache(CRYPTO_MARKET_KEY, nextState);
-    return nextState;
-  }
-
-  return cached;
-}
-
-function applyCryptoTradeImpact(currentMarket: CryptoMarketState, coinId: CryptoCoinId, direction: 1 | -1, volume: number) {
-  const currentCoin = currentMarket.coins[coinId];
-  const impact = Math.min(0.12, Math.max(0.01, volume / 500));
-  const nextValue = Math.max(0.1, Number((currentCoin.currentValue * (1 + direction * impact)).toFixed(2)));
-
-  return {
-    lastUpdatedAt: Date.now(),
-    coins: {
-      ...currentMarket.coins,
-      [coinId]: {
-        currentValue: nextValue,
-        history: [...currentCoin.history.slice(-(CRYPTO_HISTORY_LENGTH - 1)), nextValue],
-      },
-    },
-  } satisfies CryptoMarketState;
-}
 
 export function CryptoPage() {
   const { user } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(users[0]);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
-  const [market, setMarket] = useState<CryptoMarketState>(() => getCryptoMarketState());
+  const [market, setMarket] = useState<CryptoMarketState>(() => createInitialCryptoMarketState());
   const [buyAmounts, setBuyAmounts] = useState<Record<CryptoCoinId, number>>({ wutax: 10, galaxy: 10, arc: 10, nebula: 10, spark: 10 });
   const [sellAmounts, setSellAmounts] = useState<Record<CryptoCoinId, number>>({ wutax: 0, galaxy: 0, arc: 0, nebula: 0, spark: 0 });
   const [isModeratorPanelOpen, setIsModeratorPanelOpen] = useState(false);
@@ -2427,13 +2582,7 @@ export function CryptoPage() {
   }, [user]);
 
   useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      const nextState = rollCryptoMarket(getCryptoMarketState());
-      writeCache(CRYPTO_MARKET_KEY, nextState);
-      setMarket(nextState);
-    }, CRYPTO_UPDATE_INTERVAL_MS);
-
-    return () => window.clearInterval(intervalId);
+    return subscribeToCryptoMarket(setMarket);
   }, []);
 
   const invest = async (coinId: CryptoCoinId, gemAmount: number) => {
@@ -2444,10 +2593,12 @@ export function CryptoPage() {
     setPendingActionId(`${coinId}-${gemAmount}`);
     try {
       const price = market.coins[coinId].currentValue;
-      const coinAmount = Number((gemAmount / price).toFixed(6));
-      await investGemsInCoin(user.uid, coinId, gemAmount, coinAmount);
+      const roundedGemAmount = Number(gemAmount.toFixed(2));
+      const coinAmount = Number((roundedGemAmount / price).toFixed(6));
+      await investGemsInCoin(user.uid, coinId, roundedGemAmount, coinAmount);
+      await updateCryptoMarketForTrade(coinId, 1, roundedGemAmount);
       toast.success("Investment confirmed", {
-        description: `-${gemAmount} gems converted into ${coinAmount.toFixed(4)} ${CRYPTO_COINS.find((coin) => coin.id === coinId)?.shortLabel}`,
+        description: `-${roundedGemAmount.toFixed(2)} gems invested into ${CRYPTO_COINS.find((coin) => coin.id === coinId)?.shortLabel}`,
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not place that investment.");
@@ -2464,10 +2615,11 @@ export function CryptoPage() {
     setPendingActionId(`${coinId}-sell-${coinAmount}`);
     try {
       const result = await sellCoinForGems(user.uid, coinId, coinAmount, gemValue);
+      await updateCryptoMarketForTrade(coinId, -1, gemValue);
       if (result.profit > 0) {
         await addXpToUser(user.uid, Math.max(5, Math.floor(result.profit / 4)));
       }
-      toast.success("Sale confirmed", { description: `+${gemValue} gems from ${CRYPTO_COINS.find((coin) => coin.id === coinId)?.name}` });
+      toast.success("Sale confirmed", { description: `+${gemValue.toFixed(2)} gems from ${CRYPTO_COINS.find((coin) => coin.id === coinId)?.name}` });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not complete that sale.");
     } finally {
@@ -2475,26 +2627,12 @@ export function CryptoPage() {
     }
   };
 
-  const moderateCoin = (coinId: CryptoCoinId, direction: 1 | -1) => {
+  const moderateCoin = async (coinId: CryptoCoinId, direction: 1 | -1) => {
     if (!isModerator) {
       return;
     }
 
-    const current = market.coins[coinId];
-    const nextValue = Number((current.currentValue * (1 + direction * 0.05)).toFixed(2));
-        const nextState: CryptoMarketState = {
-      lastUpdatedAt: Date.now(),
-      coins: {
-        ...market.coins,
-        [coinId]: {
-          currentValue: nextValue,
-          history: [...current.history.slice(-(CRYPTO_HISTORY_LENGTH - 1)), nextValue],
-        },
-      },
-    };
-
-    writeCache(CRYPTO_MARKET_KEY, nextState);
-    setMarket(nextState);
+    await moderateCryptoMarket(coinId, direction);
   };
 
   const runModeratorReset = async (type: "gems" | "crypto") => {
@@ -2546,7 +2684,7 @@ export function CryptoPage() {
                   {CRYPTO_COINS.map((coin) => (
                     <div key={`moderate-${coin.id}`} className="rounded-2xl border border-border bg-surfaceAlt/20 p-3">
                       <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold" style={{ color: coin.accent }}>{coin.name}</p>
+                        <p className="inline-flex items-center gap-2 text-sm font-semibold" style={{ color: coin.accent }}><coin.icon size={16} />{coin.name}</p>
                         <span className="text-sm font-semibold tabular-nums">{market.coins[coin.id].currentValue.toFixed(2)}</span>
                       </div>
                       <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -2603,9 +2741,9 @@ export function CryptoPage() {
             const maxValue = Math.max(...coinMarket.history);
             const holdingsValue = holdings[coin.id] * coinMarket.currentValue;
             const chartDelta = ((coinMarket.currentValue - coinMarket.history[0]) / coinMarket.history[0]) * 100;
-            const buyAmount = Math.min(buyAmounts[coin.id], Math.max(gems, 1));
+            const buyAmount = Math.min(buyAmounts[coin.id], Math.max(gems, 0.01));
             const sellAmount = Math.min(sellAmounts[coin.id], holdings[coin.id]);
-            const sellGemValue = Math.max(1, Math.floor(sellAmount * coinMarket.currentValue));
+            const sellGemValue = Number((sellAmount * coinMarket.currentValue).toFixed(2));
             const buyCoinAmount = Number((buyAmount / coinMarket.currentValue).toFixed(4));
             const chartStroke = chartDelta >= 0 ? "#4ade80" : "#f87171";
 
@@ -2613,7 +2751,7 @@ export function CryptoPage() {
               <Card key={coin.id} className="space-y-4 border border-border bg-surface p-5">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
-                    <p className="text-sm font-semibold" style={{ color: coin.accent }}>{coin.name}</p>
+                    <p className="inline-flex items-center gap-2 text-sm font-semibold" style={{ color: coin.accent }}><coin.icon size={16} />{coin.name}</p>
                     <p className="mt-1 text-xs uppercase tracking-[0.18em] text-textMuted">{coin.shortLabel}</p>
                   </div>
                   <div className="text-right">
@@ -2629,12 +2767,12 @@ export function CryptoPage() {
                   <div className="relative h-28 overflow-hidden rounded-2xl border border-border/70 bg-surface/40 px-3 py-2">
                     <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,transparent_24%,rgba(255,255,255,0.04)_25%,transparent_26%,transparent_49%,rgba(255,255,255,0.04)_50%,transparent_51%,transparent_74%,rgba(255,255,255,0.04)_75%,transparent_76%)]" />
                     <div className="flex h-full items-end gap-0">
-                      {coinMarket.history.map((point, index) => {
+                      {coinMarket.history.flatMap((point, index, history) => {
                         const previousPoint = coinMarket.history[Math.max(0, index - 1)] ?? point;
                         const barColor = point >= previousPoint ? "#4ade80" : "#f87171";
                         const normalizedHeightPx = maxValue === minValue ? 52 : 18 + ((point - minValue) / (maxValue - minValue)) * 58;
                         const wickHeightPx = Math.min(88, normalizedHeightPx + 10);
-                        return (
+                        const bars = [
                           <div key={`${coin.id}-${index}`} className="relative flex-1 self-end px-[0.5px]">
                             <div
                               className="absolute bottom-0 left-1/2 w-px -translate-x-1/2 rounded-full"
@@ -2649,41 +2787,47 @@ export function CryptoPage() {
                               }}
                             />
                           </div>
-                        );
+                        ];
+                        if (index < history.length - 1) {
+                          const midpoint = Number(((point + history[index + 1]) / 2).toFixed(2));
+                          const midpointColor = midpoint >= point ? "#4ade80" : "#f87171";
+                          const midpointHeightPx = maxValue === minValue ? 48 : 16 + ((midpoint - minValue) / (maxValue - minValue)) * 52;
+                          bars.push(
+                            <div key={`${coin.id}-${index}-mid`} className="relative flex-1 self-end px-[0.5px]">
+                              <div
+                                className="w-full rounded-t-[1px]"
+                                style={{
+                                  height: `${midpointHeightPx}px`,
+                                  background: `${midpointColor}99`,
+                                  boxShadow: `0 0 8px ${midpointColor}22`,
+                                }}
+                              />
+                            </div>,
+                          );
+                        }
+                        return bars;
                       })}
                     </div>
                   </div>
-                  <div className="mt-3 flex items-center justify-between text-xs text-textMuted">
-                    <span>Updates every 10m</span>
-                    <span>{coinMarket.history.map((point) => point.toFixed(2)).join(" · ")}</span>
-                  </div>
+                <div className="rounded-2xl border border-border bg-surfaceAlt/30 px-4 py-3">
+                  <p className="text-xs uppercase tracking-[0.18em] text-textMuted">Holding</p>
+                  <p className="mt-1 text-lg font-semibold tabular-nums">{holdings[coin.id].toFixed(2)} | ${holdingsValue.toFixed(2)} | {chartDelta >= 0 ? "+" : ""}{chartDelta.toFixed(0)}%</p>
                 </div>
-
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-2xl border border-border bg-surfaceAlt/30 px-4 py-3">
-                    <p className="text-xs uppercase tracking-[0.18em] text-textMuted">Held</p>
-                    <p className="mt-1 text-lg font-semibold tabular-nums">{holdings[coin.id]}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-surfaceAlt/30 px-4 py-3 sm:col-span-2">
-                    <p className="text-xs uppercase tracking-[0.18em] text-textMuted">Current holding value</p>
-                    <p className="mt-1 text-lg font-semibold tabular-nums">{holdingsValue.toFixed(2)}</p>
-                  </div>
                 </div>
 
                 <div className="grid gap-4 lg:grid-cols-2">
                   <div className="rounded-2xl border border-border bg-surfaceAlt/30 p-4">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-sm font-semibold">Buy</p>
-                      <span className="text-sm font-semibold tabular-nums">{buyAmount} gems</span>
+                      <span className="text-sm font-semibold tabular-nums">{buyAmount.toFixed(2)} gems</span>
                     </div>
-                    <p className="mt-2 text-xs text-textMuted">Converts into {buyCoinAmount.toFixed(4)} coins at the current market price.</p>
                     <input
                       type="range"
-                      min={1}
-                      max={Math.max(gems, 1)}
-                      step={1}
+                      min={0.01}
+                      max={Math.max(gems, 0.01)}
+                      step={0.01}
                       value={buyAmount}
-                      disabled={!user || gems < 1}
+                      disabled={!user || gems < 0.01}
                       onChange={(event) => {
                         const nextAmount = Number(event.target.value);
                         setBuyAmounts((current) => ({ ...current, [coin.id]: nextAmount }));
@@ -2693,7 +2837,7 @@ export function CryptoPage() {
                     />
                     <Button
                       className="mt-4 w-full"
-                      disabled={!user || pendingActionId !== null || gems < 1}
+                      disabled={!user || pendingActionId !== null || gems < 0.01}
                       onClick={() => void invest(coin.id, buyAmount)}
                     >
                       {pendingActionId === `${coin.id}-${buyAmount}` ? "Buying..." : `Buy ${buyCoinAmount.toFixed(4)} ${coin.shortLabel}`}
@@ -2703,15 +2847,15 @@ export function CryptoPage() {
                   <div className="rounded-2xl border border-border bg-surfaceAlt/30 p-4">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-sm font-semibold">Sell</p>
-                      <span className="text-sm font-semibold tabular-nums">{sellAmount} coins</span>
+                      <span className="text-sm font-semibold tabular-nums">{sellAmount.toFixed(2)} coins</span>
                     </div>
                     <input
                       type="range"
                       min={0}
                       max={Math.max(holdings[coin.id], 0)}
-                      step={1}
+                      step={0.01}
                       value={sellAmount}
-                      disabled={!user || holdings[coin.id] < 1}
+                      disabled={!user || holdings[coin.id] < 0.01}
                       onChange={(event) => {
                         const nextAmount = Number(event.target.value);
                         setSellAmounts((current) => ({ ...current, [coin.id]: nextAmount }));
@@ -2722,10 +2866,10 @@ export function CryptoPage() {
                     <Button
                       variant="secondary"
                       className="mt-4 w-full"
-                      disabled={!user || pendingActionId !== null || sellAmount < 1}
+                      disabled={!user || pendingActionId !== null || sellAmount < 0.01}
                       onClick={() => void sell(coin.id, sellAmount, sellGemValue)}
                     >
-                      {pendingActionId === `${coin.id}-sell-${sellAmount}` ? "Selling..." : `Sell ${sellAmount} for ${sellGemValue}`}
+                      {pendingActionId === `${coin.id}-sell-${sellAmount}` ? "Selling..." : `Sell ${sellAmount.toFixed(2)} for ${sellGemValue.toFixed(2)}`}
                     </Button>
                   </div>
                 </div>
@@ -2757,12 +2901,11 @@ export function ShopPage() {
 
 export function LeaderboardPage() {
   const navigate = useNavigate();
-  const [leaderboardTab, setLeaderboardTab] = useState<"level" | "gems" | "posts">("level");
+  const [leaderboardTab, setLeaderboardTab] = useState<"level" | "gems" | "posts" | "followers">("level");
   const [leaders, setLeaders] = useState(users);
   const [allPosts, setAllPosts] = useState<Post[]>([]);
 
   useEffect(() => subscribeToPosts(setAllPosts), []);
-
   useEffect(() => {
     if (leaderboardTab === "level") {
       return subscribeToXpLeaderboard(setLeaders);
@@ -2774,9 +2917,14 @@ export function LeaderboardPage() {
           accumulator[post.authorId] = (accumulator[post.authorId] ?? 0) + 1;
           return accumulator;
         }, {});
+        const profileMap = new Map<string, UserProfile>();
+
+        [...users, ...profiles].forEach((profile) => {
+          profileMap.set(profile.uid, profile);
+        });
 
         setLeaders(
-          profiles
+          Array.from(profileMap.values())
             .map((profile) => ({
               ...profile,
               postCount: postCounts[profile.uid] ?? 0,
@@ -2787,10 +2935,10 @@ export function LeaderboardPage() {
       });
     }
 
-    return subscribeToUserLeaderboard(leaderboardTab === "gems" ? "gems" : "postCount", setLeaders);
+    return subscribeToUserLeaderboard(leaderboardTab === "gems" ? "gems" : leaderboardTab === "followers" ? "followerCount" : "postCount", setLeaders);
   }, [allPosts, leaderboardTab]);
 
-  const metricLabel = leaderboardTab === "level" ? "Level" : leaderboardTab === "gems" ? "Gems" : "Posts";
+  const metricLabel = leaderboardTab === "level" ? "Level" : leaderboardTab === "gems" ? "Gems" : leaderboardTab === "followers" ? "Followers" : "Posts";
 
   return (
     <PageFrame title="Leaderboard" subtitle="Switch between the top level, top gems, and top posts leaders.">
@@ -2817,12 +2965,24 @@ export function LeaderboardPage() {
           >
             Top posts
           </button>
+          <button
+            type="button"
+            onClick={() => setLeaderboardTab("followers")}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${leaderboardTab === "followers" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
+          >
+            Top followers
+          </button>
         </div>
         {leaders.map((leader, index) => {
-          const metricValue = leaderboardTab === "level" ? leader.level : leaderboardTab === "gems" ? leader.gems : leader.postCount;
+          const metricValue = leaderboardTab === "level" ? leader.level : leaderboardTab === "gems" ? leader.gems : leaderboardTab === "followers" ? leader.followerCount : leader.postCount;
 
           return (
-            <Card key={leader.uid} className="overflow-hidden p-0">
+            <div
+              key={leader.uid}
+              className="rounded-3xl p-px"
+              style={leader.equippedProfileBorderId && leader.equippedProfileBorderId !== "border-none" ? getProfileBorderStyle(leader.equippedProfileBorderId) : undefined}
+            >
+            <Card className="overflow-hidden border border-border p-0">
               <div className="h-24 w-full" style={formatBannerStyle(leader)} />
               <div className="relative p-5">
                 <div className="absolute -top-8 left-5 flex h-16 w-16 items-center justify-center rounded-[1.75rem] border-4 border-canvas bg-canvas">
@@ -2830,7 +2990,6 @@ export function LeaderboardPage() {
                     name={leader.displayName}
                     src={leader.photoURL}
                     className="h-full w-full rounded-[1.2rem]"
-                    borderId={leader.equippedProfileBorderId}
                   />
                 </div>
                 <div className="flex items-start justify-between gap-4 pt-10">
@@ -2864,6 +3023,7 @@ export function LeaderboardPage() {
                 </div>
               </div>
             </Card>
+            </div>
           );
         })}
       </div>
@@ -2878,3 +3038,7 @@ export function AboutPage() {
 export function NotFoundPage() {
   return <PageFrame title="Page Not Found" subtitle="The route does not exist in this demo." />;
 }
+
+
+
+

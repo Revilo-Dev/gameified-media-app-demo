@@ -511,10 +511,12 @@ export function ExplorePage() {
 }
 
 export function ProfilePage() {
+  const { user: authUser } = useAuth();
   const { handle } = useParams();
   const currentUserHandle = auth.currentUser?.email?.split("@")[0] ?? "";
   const currentUserId = auth.currentUser?.uid ?? "";
   const [user, setUser] = useState(() => (handle ? users.find((profile) => profile.handle === handle) ?? null : null));
+  const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
   const isOwnProfile = Boolean(user && (handle === currentUserHandle || user.uid === currentUserId));
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [followCounts, setFollowCounts] = useState({ followers: user?.followerCount ?? 0, following: user?.followingCount ?? 0 });
@@ -531,6 +533,15 @@ export function ProfilePage() {
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [followProfiles, setFollowProfiles] = useState<Record<string, UserProfile | null>>({});
   const [market, setMarket] = useState<CryptoMarketState>(() => createInitialCryptoMarketState());
+
+  useEffect(() => {
+    if (!authUser) {
+      setCurrentUserProfile(null);
+      return;
+    }
+
+    return subscribeToUserProfileById(authUser.uid, setCurrentUserProfile);
+  }, [authUser]);
 
   useEffect(() => {
     if (!handle) {
@@ -683,6 +694,51 @@ export function ProfilePage() {
     [followProfiles, visibleFollowIds],
   );
   const timeoutLabel = getTimeoutRemainingLabel(user?.timeoutUntil);
+  const canModerateInventory = Boolean(currentUserProfile?.isModerator);
+
+  async function removeOwnedNameColor(colorId: string) {
+    if (!canModerateInventory || !user) {
+      return;
+    }
+
+    const targetUser = user;
+    const nextOwnedNameColorIds = (targetUser.ownedNameColorIds ?? ["default"]).filter((ownedColorId) => ownedColorId !== colorId);
+    await updateUserProfile(targetUser.uid, {
+      ownedNameColorIds: nextOwnedNameColorIds.length ? nextOwnedNameColorIds : ["default"],
+      equippedNameColorId: targetUser.equippedNameColorId === colorId ? "default" : targetUser.equippedNameColorId,
+    });
+    toast.success("Name color removed from inventory");
+  }
+
+  async function removeOwnedProfileBorder(borderId: string) {
+    if (!canModerateInventory || !user) {
+      return;
+    }
+
+    const targetUser = user;
+    const nextOwnedProfileBorderIds = (targetUser.ownedProfileBorderIds ?? ["border-none"]).filter((ownedBorderId) => ownedBorderId !== borderId);
+    await updateUserProfile(targetUser.uid, {
+      ownedProfileBorderIds: nextOwnedProfileBorderIds.length ? nextOwnedProfileBorderIds : ["border-none"],
+      equippedProfileBorderId: targetUser.equippedProfileBorderId === borderId ? "border-none" : targetUser.equippedProfileBorderId,
+    });
+    toast.success("Profile border removed from inventory");
+  }
+
+  async function removeOwnedTheme(themeId: ThemeMode) {
+    if (!canModerateInventory || !user) {
+      return;
+    }
+
+    const targetUser = user;
+    const nextOwnedThemeIds = (targetUser.ownedThemeIds ?? FREE_THEME_IDS).filter((ownedThemeId) => ownedThemeId !== themeId);
+    const safeOwnedThemeIds = nextOwnedThemeIds.length ? nextOwnedThemeIds : [...FREE_THEME_IDS];
+    await updateUserProfile(targetUser.uid, {
+      ownedThemeIds: safeOwnedThemeIds,
+      theme: targetUser.theme === themeId ? safeOwnedThemeIds[0] : targetUser.theme,
+    });
+    toast.success("Theme removed from inventory");
+  }
+
   if (!user) {
     return (
       <PageFrame title="Profile not found" subtitle="This profile is not available in the current demo dataset.">
@@ -915,7 +971,14 @@ export function ProfilePage() {
                         <p className="font-semibold" style={getNameColorStyle(option.id)}>{option.name}</p>
                         <p className="mt-1 text-xs text-textMuted">{option.description}</p>
                       </div>
-                      <span className="rounded-full border border-border px-2 py-1 text-[11px] font-semibold text-textMuted">{formatInventoryRarityLabel(option.rarity)}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full border border-border px-2 py-1 text-[11px] font-semibold text-textMuted">{formatInventoryRarityLabel(option.rarity)}</span>
+                        {canModerateInventory && option.id !== "default" ? (
+                          <Button type="button" variant="ghost" size="sm" className="text-red-400 hover:text-red-300" onClick={() => void removeOwnedNameColor(option.id)}>
+                            Delete
+                          </Button>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -935,8 +998,15 @@ export function ProfilePage() {
                         <p className="font-semibold">{option.name}</p>
                         <p className="mt-1 text-xs text-textMuted">{option.description}</p>
                       </div>
-                      <div className="h-10 w-10 shrink-0 rounded-2xl p-[3px]" style={getProfileBorderStyle(option.id)}>
-                        <div className="h-full w-full rounded-[13px] bg-canvas" />
+                      <div className="flex items-center gap-2">
+                        <div className="h-10 w-10 shrink-0 rounded-2xl p-[3px]" style={getProfileBorderStyle(option.id)}>
+                          <div className="h-full w-full rounded-[13px] bg-canvas" />
+                        </div>
+                        {canModerateInventory && option.id !== "border-none" ? (
+                          <Button type="button" variant="ghost" size="sm" className="text-red-400 hover:text-red-300" onClick={() => void removeOwnedProfileBorder(option.id)}>
+                            Delete
+                          </Button>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -957,9 +1027,16 @@ export function ProfilePage() {
                         <p className="font-semibold">{theme.label}</p>
                         <p className="mt-1 text-xs text-textMuted">{theme.description}</p>
                       </div>
-                      <span className="rounded-full border border-border px-2 py-1 text-[11px] font-semibold text-textMuted">
-                        {theme.price > 0 ? `${theme.price} gems` : "Starter"}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full border border-border px-2 py-1 text-[11px] font-semibold text-textMuted">
+                          {theme.price > 0 ? `${theme.price} gems` : "Starter"}
+                        </span>
+                        {canModerateInventory && theme.price > 0 ? (
+                          <Button type="button" variant="ghost" size="sm" className="text-red-400 hover:text-red-300" onClick={() => void removeOwnedTheme(theme.id as ThemeMode)}>
+                            Delete
+                          </Button>
+                        ) : null}
+                      </div>
                     </div>
                     <div className="mt-4 grid grid-cols-4 gap-2">
                       <span className="h-6 rounded-full border border-border" style={{ background: theme.tokens.background }} />

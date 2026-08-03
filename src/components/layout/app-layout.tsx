@@ -447,7 +447,7 @@ export function AppLayout() {
 
       {mobileMenuOpen ? (
         <div className="fixed inset-0 z-50 bg-black/45 px-3 pb-24 pt-20 backdrop-blur-sm lg:hidden">
-          <div className="mx-auto max-w-md rounded-[2rem] border border-border bg-canvas p-4 shadow-panel">
+          <div className="ml-auto h-full max-w-sm rounded-l-[2rem] border-l border-t border-border bg-canvas p-4 shadow-panel">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold">More</p>
@@ -457,27 +457,27 @@ export function AppLayout() {
                 <X size={16} />
               </Button>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
               {mobileSecondaryNavItems.map((item) => {
                 const destination = item.to ?? profilePath;
                 return (
                   <NavLink
                     key={`${item.label}-${destination}`}
                     to={destination}
-                    className={({ isActive }) => `relative flex min-h-24 flex-col justify-between rounded-3xl border px-4 py-4 text-left transition ${
+                    className={({ isActive }) => `relative flex items-center gap-3 rounded-2xl border px-4 py-3 text-left transition ${
                       isActive ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10 text-text" : "border-border bg-surface text-text"
                     }`}
                     onClick={() => setMobileMenuOpen(false)}
                   >
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
                       <item.icon size={18} />
-                      {item.label === "Notifications" && notificationCount ? (
-                        <span className="rounded-full bg-[color:var(--error)] px-2 py-0.5 text-[10px] font-semibold text-white">
-                          {notificationCount}
-                        </span>
-                      ) : null}
                     </div>
-                    <span className="text-sm font-semibold">{item.label}</span>
+                    <span className="flex-1 text-sm font-semibold">{item.label}</span>
+                    {item.label === "Notifications" && notificationCount ? (
+                      <span className="rounded-full bg-[color:var(--error)] px-2 py-0.5 text-[10px] font-semibold text-white">
+                        {notificationCount}
+                      </span>
+                    ) : null}
                   </NavLink>
                 );
               })}

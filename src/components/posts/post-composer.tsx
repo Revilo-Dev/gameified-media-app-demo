@@ -10,8 +10,8 @@ import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { useAuth } from "@/app/auth-provider";
 import { createNotification, getUserProfile } from "@/firebase/notifications";
-import { createPost, createReply, extractMentions } from "@/firebase/posts";
-import { addXpToUser, subscribeToUserProfileByHandle, subscribeToUserProfileById } from "@/firebase/users";
+import { createPost, createReply, extractHashtags, extractMentions, subscribeToPosts } from "@/firebase/posts";
+import { addXpToUser, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToUserProfiles } from "@/firebase/users";
 import { uploadPostImage } from "@/firebase/storage";
 import { getPostingCooldownRemainingSeconds } from "@/features/gamification/anti-abuse";
 import { UserBadges } from "@/components/common/user-badges";
@@ -41,6 +41,13 @@ interface GifResult {
   id: string;
   preview: string;
   url: string;
+}
+
+interface ComposerSuggestion {
+  id: string;
+  label: string;
+  insertValue: string;
+  meta?: string;
 }
 
 async function searchGifs(queryText: string): Promise<GifResult[]> {
@@ -97,13 +104,17 @@ export function PostComposer({
   const [gifQuery, setGifQuery] = useState("");
   const [gifResults, setGifResults] = useState<GifResult[]>([]);
   const [isGifLoading, setIsGifLoading] = useState(false);
+  const [profiles, setProfiles] = useState<UserProfile[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
   const mediaMenuRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const isReply = Boolean(parentPost);
   const storageKey = isReply ? REPLY_COOLDOWN_STORAGE_KEY : POST_COOLDOWN_STORAGE_KEY;
   const form = useForm<PostFormValues>({
     resolver: zodResolver(postSchema),
     defaultValues: { content: "", pollQuestion: "", pollOptionOne: "", pollOptionTwo: "" },
   });
+  const contentField = form.register("content");
 
   const content = form.watch("content");
   const timeoutUntil = profile?.timeoutUntil ? new Date(profile.timeoutUntil) : null;
@@ -129,6 +140,9 @@ export function PostComposer({
 
     return subscribeToUserProfileById(user.uid, setProfile);
   }, [user]);
+
+  useEffect(() => subscribeToUserProfiles(setProfiles), []);
+  useEffect(() => subscribeToPosts(setPosts), []);
 
   useEffect(() => {
     if (!mediaMenuOpen) {
@@ -241,7 +255,7 @@ export function PostComposer({
       repostedPostId: null,
       quotedPostId: null,
       replyToPostId: replyToPost?.id ?? null,
-      tags: [],
+      tags: extractHashtags(values.content.trim()),
       visibility: "public" as const,
       poll:
         !isReply && pollEnabled && values.pollQuestion?.trim() && values.pollOptionOne?.trim() && values.pollOptionTwo?.trim()
@@ -293,6 +307,68 @@ export function PostComposer({
   }
 
   const shellClassName = mode === "modal" ? "p-0 shadow-none border-0 bg-transparent" : "p-4 sm:p-5";
+  const selectionEnd = textareaRef.current?.selectionEnd ?? content.length;
+  const activeEntityMatch = content.slice(0, selectionEnd).match(/(^|\s)([@#][a-zA-Z0-9_]*)$/);
+  const activeEntity = activeEntityMatch?.[2] ?? null;
+  const activeEntityQuery = activeEntity ? activeEntity.slice(1).toLowerCase() : "";
+  const hashtagSuggestions = useMemo(() => {
+    const counts = posts.reduce<Record<string, number>>((accumulator, post) => {
+      post.tags.forEach((tag) => {
+        accumulator[tag] = (accumulator[tag] ?? 0) + 1;
+      });
+      return accumulator;
+    }, {});
+
+    return Object.entries(counts)
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .map(([tag, count]) => ({ tag, count }));
+  }, [posts]);
+  const suggestions = useMemo<ComposerSuggestion[]>(() => {
+    if (!activeEntity) {
+      return [];
+    }
+
+    if (activeEntity.startsWith("@")) {
+      return profiles
+        .filter((candidate) => candidate.handle.toLowerCase().includes(activeEntityQuery))
+        .slice(0, 6)
+        .map((candidate) => ({
+          id: candidate.uid,
+          label: `@${candidate.handle}`,
+          insertValue: `@${candidate.handle}`,
+          meta: candidate.displayName,
+        }));
+    }
+
+    return hashtagSuggestions
+      .filter((candidate) => candidate.tag.includes(activeEntityQuery))
+      .slice(0, 6)
+      .map((candidate) => ({
+        id: candidate.tag,
+        label: `#${candidate.tag}`,
+        insertValue: `#${candidate.tag}`,
+        meta: `${candidate.count} post${candidate.count === 1 ? "" : "s"}`,
+      }));
+  }, [activeEntity, activeEntityQuery, hashtagSuggestions, profiles]);
+
+  function applySuggestion(insertValue: string) {
+    const textarea = textareaRef.current;
+    if (!textarea || !activeEntity) {
+      return;
+    }
+
+    const start = textarea.selectionStart ?? content.length;
+    const end = textarea.selectionEnd ?? content.length;
+    const prefix = content.slice(0, start).replace(/([@#][a-zA-Z0-9_]*)$/, insertValue);
+    const suffix = content.slice(end);
+    const nextValue = `${prefix} ${suffix}`.replace(/\s{2,}/g, " ");
+    form.setValue("content", nextValue, { shouldDirty: true, shouldTouch: true, shouldValidate: true });
+    window.requestAnimationFrame(() => {
+      const nextCaret = prefix.length + 1;
+      textarea.focus();
+      textarea.setSelectionRange(nextCaret, nextCaret);
+    });
+  }
 
   return (
     <Card className={shellClassName}>
@@ -312,7 +388,11 @@ export function PostComposer({
             </div>
             <div className="relative overflow-visible rounded-[1.75rem] border border-border bg-surface">
               <textarea
-                {...form.register("content")}
+                {...contentField}
+                ref={(element) => {
+                  contentField.ref(element);
+                  textareaRef.current = element;
+                }}
                 placeholder={isReply ? "Write a reply..." : "Share a something..."}
                 disabled={isTimedOut}
                 onPaste={async (event) => {
@@ -330,6 +410,21 @@ export function PostComposer({
                 }}
                 className="min-h-28 w-full resize-none bg-transparent px-4 pb-12 pt-4 text-sm text-text outline-none placeholder:text-textMuted"
               />
+              {suggestions.length ? (
+                <div className="absolute left-3 right-3 top-[calc(100%+0.5rem)] z-30 rounded-2xl border border-border bg-canvas p-2 shadow-panel">
+                  {suggestions.map((suggestion) => (
+                    <button
+                      key={suggestion.id}
+                      type="button"
+                      className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm hover:bg-surfaceAlt"
+                      onClick={() => applySuggestion(suggestion.insertValue)}
+                    >
+                      <span className="font-semibold text-[color:var(--accent)]">{suggestion.label}</span>
+                      {suggestion.meta ? <span className="text-xs text-textMuted">{suggestion.meta}</span> : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <div className="absolute inset-x-0 bottom-0 flex items-center justify-between px-3 py-2">
                 <div ref={mediaMenuRef} className="relative">
                   <button

@@ -13,7 +13,7 @@ export function Avatar({ name, src, className, borderId }: AvatarProps) {
 
   if (borderOptionStyle) {
     return (
-      <div className="inline-flex rounded-[1.1rem] p-[3px]" style={borderOptionStyle}>
+      <div className="inline-flex h-fit w-fit shrink-0 rounded-[1.1rem] p-[3px]" style={borderOptionStyle}>
         {src ? (
           <img src={src} alt={name} loading="eager" decoding="async" fetchPriority="high" className={cn("h-11 w-11 rounded-2xl object-cover bg-canvas", className)} />
         ) : (

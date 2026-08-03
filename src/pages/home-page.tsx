@@ -10,12 +10,15 @@ import { useAuth } from "@/app/auth-provider";
 import { Link } from "react-router-dom";
 import { subscribeToFollowingIds } from "@/firebase/follows";
 
+const TIMELINE_PAGE_SIZE = 50;
+
 export function HomePage() {
   const { timelineTab, setTimelineTab } = useUiStore();
   const { user, isLoading } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [isPostsLoading, setIsPostsLoading] = useState(true);
+  const [visiblePostCount, setVisiblePostCount] = useState(TIMELINE_PAGE_SIZE);
 
   useEffect(() => {
     return subscribeToPosts((nextPosts) => {
@@ -36,6 +39,12 @@ export function HomePage() {
   const visiblePosts = posts
     .filter((post) => !post.parentPostId)
     .filter((post) => timelineTab === "for-you" || followingIds.includes(post.authorId));
+  const pagedPosts = visiblePosts.slice(0, visiblePostCount);
+  const canLoadMorePosts = visiblePosts.length > visiblePostCount;
+
+  useEffect(() => {
+    setVisiblePostCount(TIMELINE_PAGE_SIZE);
+  }, [timelineTab, user?.uid]);
 
   return (
     <div className="space-y-5">
@@ -68,9 +77,20 @@ export function HomePage() {
           <PostComposer />
           {isPostsLoading ? Array.from({ length: 3 }).map((_, index) => (
             <PostSkeleton key={`post-skeleton-${index}`} />
-          )) : visiblePosts.map((post) => (
+          )) : pagedPosts.map((post) => (
               <PostCard key={post.id} post={post} priority="high" />
             ))}
+          {!isPostsLoading && canLoadMorePosts ? (
+            <Card className="p-4">
+              <button
+                type="button"
+                className="w-full rounded-2xl border border-border bg-surface px-4 py-3 text-sm font-semibold transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                onClick={() => setVisiblePostCount((current) => current + TIMELINE_PAGE_SIZE)}
+              >
+                Load more posts
+              </button>
+            </Card>
+          ) : null}
         </>
       ) : (
         <Card className="space-y-4 p-6">

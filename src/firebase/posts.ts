@@ -94,7 +94,7 @@ export function subscribeToPosts(onChange: (posts: Post[]) => void): Unsubscribe
     onChange(cachedPosts);
   }
 
-  const postsQuery = query(collection(db, COLLECTIONS.posts), orderBy("createdAt", "desc"), limit(100));
+  const postsQuery = query(collection(db, COLLECTIONS.posts), orderBy("createdAt", "desc"));
 
   return onSnapshot(postsQuery, (snapshot) => {
     const nextPosts = snapshot.docs.map(normalizePost).filter((post) => !post.isDeleted);
@@ -104,7 +104,7 @@ export function subscribeToPosts(onChange: (posts: Post[]) => void): Unsubscribe
 }
 
 export function subscribeToPostsByAuthor(authorId: string, onChange: (posts: Post[]) => void): Unsubscribe {
-  const postsQuery = query(collection(db, COLLECTIONS.posts), where("authorId", "==", authorId), orderBy("createdAt", "desc"), limit(100));
+  const postsQuery = query(collection(db, COLLECTIONS.posts), where("authorId", "==", authorId), orderBy("createdAt", "desc"));
 
   return onSnapshot(postsQuery, (snapshot) => {
     onChange(snapshot.docs.map(normalizePost).filter((post) => !post.isDeleted));
@@ -300,7 +300,6 @@ export async function softDeletePost(postId: string) {
 export async function throwRottenTomato(postId: string, user: UserProfile) {
   const reactionRef = doc(db, COLLECTIONS.reactions, reactionDocId(postId, user.uid, "rotten"));
   const postRef = doc(db, COLLECTIONS.posts, postId);
-  let shouldDelete = false;
   let authorId: string | null = null;
   let usedPremiumFreebie = false;
 
@@ -333,7 +332,6 @@ export async function throwRottenTomato(postId: string, user: UserProfile) {
 
     authorId = String(postSnapshot.data().authorId ?? "");
     const nextTomatoes = Number(postSnapshot.data().rottenTomatoCount ?? 0) + 1;
-    shouldDelete = nextTomatoes >= 5;
 
     transaction.set(reactionRef, {
       postId,
@@ -356,11 +354,6 @@ export async function throwRottenTomato(postId: string, user: UserProfile) {
       reactionCount: increment(1),
     });
   });
-
-  if (shouldDelete) {
-    await deletePostCascade(postId);
-    return { deleted: true };
-  }
 
   if (authorId && authorId !== user.uid) {
     await createNotification({
@@ -500,6 +493,10 @@ export async function deletePostCascade(postId: string) {
 
 export function extractMentions(content: string) {
   return Array.from(new Set((content.match(/@([a-zA-Z0-9_]+)/g) ?? []).map((item) => item.slice(1).toLowerCase())));
+}
+
+export function extractHashtags(content: string) {
+  return Array.from(new Set((content.match(/#([a-zA-Z0-9_]+)/g) ?? []).map((item) => item.slice(1).toLowerCase())));
 }
 
 export function subscribeToLeaderboardRank(userId: string, onChange: (rank: number | null) => void): Unsubscribe {

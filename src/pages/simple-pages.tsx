@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -157,6 +157,17 @@ function getNotificationVisual(type: NotificationItem["type"]) {
 
 const changelogEntries = [
   {
+    version: "V0.73",
+    date: "August 3, 2026",
+    items: [
+      "Timeline loading was reworked so posts and replies can persist indefinitely, with the home feed now revealing older content in 50-post batches through a new load-more flow.",
+      "Rotten tomato feedback was softened into a quick hit animation instead of a permanent post overlay, while rotten tomato counts now live in the profile stats area rather than the header card.",
+      "Profiles gained a dedicated inventory tab that lists owned themes, name colors, and profile borders, making market unlocks visible after purchase.",
+      "Mobile and thread interactions were tightened up with a side-sheet hamburger menu, a sticky reply composer on post pages, unclipped post action menus, and cleaner in-post avatar border sizing.",
+      "Composer and discovery flows now recognize hashtags more reliably, save them with posts, and offer inline autocomplete for both @mentions and #tags to speed up posting and search.",
+    ],
+  },
+  {
     version: "V0.71",
     date: "August 3, 2026",
     items: [
@@ -251,6 +262,10 @@ function getOwnedThemeIds(profile: Pick<UserProfile, "ownedThemeIds" | "theme">)
   return [...new Set([...(profile.ownedThemeIds ?? FREE_THEME_IDS), profile.theme, ...FREE_THEME_IDS])];
 }
 
+function formatInventoryRarityLabel(rarity: string) {
+  return rarity.charAt(0).toUpperCase() + rarity.slice(1);
+}
+
 function getDailyGemReward(isPremium: boolean) {
   return BASE_DAILY_GEM_REWARD * (isPremium ? PREMIUM_DAILY_GEM_MULTIPLIER : 1);
 }
@@ -303,13 +318,18 @@ function ReplyCard({
 
 export function ExplorePage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [posts, setPosts] = useState<Post[]>([]);
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
-  const [queryText, setQueryText] = useState("");
+  const [queryText, setQueryText] = useState(() => searchParams.get("query") ?? "");
   const [feedSort, setFeedSort] = useState<"recent" | "stars" | "comments">("recent");
 
   useEffect(() => subscribeToPosts(setPosts), []);
   useEffect(() => subscribeToUserProfiles(setProfiles), []);
+  useEffect(() => {
+    const nextQuery = searchParams.get("query") ?? "";
+    setQueryText(nextQuery);
+  }, [searchParams]);
 
   const normalizedQuery = queryText.trim().toLowerCase();
   const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
@@ -385,6 +405,21 @@ export function ExplorePage() {
       return [...existingTokens, token].join(" ").trim();
     });
   }
+
+  useEffect(() => {
+    const normalized = queryText.trim();
+    const currentQuery = searchParams.get("query") ?? "";
+    if (currentQuery === normalized) {
+      return;
+    }
+    const nextParams = new URLSearchParams(searchParams);
+    if (normalized) {
+      nextParams.set("query", normalized);
+    } else {
+      nextParams.delete("query");
+    }
+    setSearchParams(nextParams, { replace: true });
+  }, [queryText, searchParams, setSearchParams]);
 
   return (
     <PageFrame title="Explore" subtitle="Search users, posts, hashtags, and replies from one discovery surface." titleIcon={Search}>
@@ -488,7 +523,7 @@ export function ProfilePage() {
   const [isTogglingFollow, setIsTogglingFollow] = useState(false);
   const [allUserPosts, setAllUserPosts] = useState<Post[]>([]);
   const [allPosts, setAllPosts] = useState<Post[]>([]);
-  const [profileTab, setProfileTab] = useState<"posts" | "replies" | "stats">("posts");
+  const [profileTab, setProfileTab] = useState<"posts" | "replies" | "stats" | "inventory">("posts");
   const [leaderboardRank, setLeaderboardRank] = useState<number | null>(null);
   const [parentAuthors, setParentAuthors] = useState<Record<string, (typeof users)[number] | null>>({});
   const [followModalTab, setFollowModalTab] = useState<"followers" | "following" | null>(null);
@@ -585,6 +620,22 @@ export function ProfilePage() {
 
   const userPosts = useMemo(() => allUserPosts.filter((post) => !post.parentPostId), [allUserPosts]);
   const userReplies = useMemo(() => allUserPosts.filter((post) => Boolean(post.parentPostId)), [allUserPosts]);
+  const ownedThemeItems = useMemo(
+    () => (user ? getOwnedThemeIds(user).map((themeId) => ({ id: themeId, ...themePresets[themeId], price: THEME_MARKET_PRICES[themeId] ?? 0 })) : []),
+    [user],
+  );
+  const ownedNameColorItems = useMemo(
+    () => ((user?.ownedNameColorIds ?? ["default"]))
+      .map((colorId) => NAME_COLOR_OPTIONS.find((option) => option.id === colorId))
+      .filter((option): option is (typeof NAME_COLOR_OPTIONS)[number] => Boolean(option)),
+    [user],
+  );
+  const ownedProfileBorderItems = useMemo(
+    () => ((user?.ownedProfileBorderIds ?? ["border-none"]))
+      .map((borderId) => PROFILE_BORDER_OPTIONS.find((option) => option.id === borderId))
+      .filter((option): option is (typeof PROFILE_BORDER_OPTIONS)[number] => Boolean(option)),
+    [user],
+  );
   const isMutual = isFollowing && followsViewer;
   const canViewPosts = !user?.isPrivate || isOwnProfile || isMutual;
 
@@ -724,10 +775,8 @@ export function ProfilePage() {
                 <p className="mt-1 font-semibold">{leaderboardRank ? `#${leaderboardRank}` : "Unranked"}</p>
               </div>
               <div className="rounded-2xl border border-border bg-surfaceAlt/50 px-3 py-2">
-                <p className="text-xs text-textMuted">Rotten tomatoes</p>
-                <p className="mt-1 inline-flex items-center gap-1 font-semibold text-rose-300">
-                  <TomatoIcon className="h-4 w-4" /> {user.rottenTomatoCount ?? 0}
-                </p>
+                <p className="text-xs text-textMuted">Gems</p>
+                <p className="mt-1 font-semibold tabular-nums">{formatAmount(user.gems)}</p>
               </div>
             </div>
           </div>
@@ -779,6 +828,13 @@ export function ProfilePage() {
             className={`rounded-full px-4 py-2 text-sm font-semibold transition ${profileTab === "stats" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
           >
             Profile
+          </button>
+          <button
+            type="button"
+            onClick={() => setProfileTab("inventory")}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${profileTab === "inventory" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
+          >
+            Inventory
           </button>
         </div>
 
@@ -842,6 +898,80 @@ export function ProfilePage() {
               </div>
             </div>
           </Card>
+        ) : profileTab === "inventory" ? (
+          <div className="space-y-4">
+            <Card className="space-y-4 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Name Colors</p>
+                  <p className="mt-1 text-sm text-textMuted">{ownedNameColorItems.length} owned</p>
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {ownedNameColorItems.map((option) => (
+                  <div key={option.id} className="rounded-2xl border border-border bg-surfaceAlt/35 px-4 py-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold" style={getNameColorStyle(option.id)}>{option.name}</p>
+                        <p className="mt-1 text-xs text-textMuted">{option.description}</p>
+                      </div>
+                      <span className="rounded-full border border-border px-2 py-1 text-[11px] font-semibold text-textMuted">{formatInventoryRarityLabel(option.rarity)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            <Card className="space-y-4 p-5">
+              <div>
+                <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Profile Borders</p>
+                <p className="mt-1 text-sm text-textMuted">{ownedProfileBorderItems.length} owned</p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {ownedProfileBorderItems.map((option) => (
+                  <div key={option.id} className="rounded-2xl border border-border bg-surfaceAlt/35 px-4 py-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold">{option.name}</p>
+                        <p className="mt-1 text-xs text-textMuted">{option.description}</p>
+                      </div>
+                      <div className="h-10 w-10 shrink-0 rounded-2xl p-[3px]" style={getProfileBorderStyle(option.id)}>
+                        <div className="h-full w-full rounded-[13px] bg-canvas" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            <Card className="space-y-4 p-5">
+              <div>
+                <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Themes</p>
+                <p className="mt-1 text-sm text-textMuted">{ownedThemeItems.length} owned</p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {ownedThemeItems.map((theme) => (
+                  <div key={theme.id} className="rounded-2xl border border-border bg-surfaceAlt/35 px-4 py-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold">{theme.label}</p>
+                        <p className="mt-1 text-xs text-textMuted">{theme.description}</p>
+                      </div>
+                      <span className="rounded-full border border-border px-2 py-1 text-[11px] font-semibold text-textMuted">
+                        {theme.price > 0 ? `${theme.price} gems` : "Starter"}
+                      </span>
+                    </div>
+                    <div className="mt-4 grid grid-cols-4 gap-2">
+                      <span className="h-6 rounded-full border border-border" style={{ background: theme.tokens.background }} />
+                      <span className="h-6 rounded-full border border-border" style={{ background: theme.tokens.surface }} />
+                      <span className="h-6 rounded-full border border-border" style={{ background: theme.tokens.surfaceAlt }} />
+                      <span className="h-6 rounded-full border border-border" style={{ background: theme.tokens.accent }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
         ) : profileTab === "posts" ? (
           userPosts.length ? userPosts.map((post) => <PostCard key={post.id} post={post} />) : (
             <Card className="p-6 text-sm text-textMuted">No posts yet.</Card>
@@ -1810,30 +1940,30 @@ export function PostPage() {
             {replies.length ? renderReplies(post.id) : (
               <p className="text-sm text-textMuted">No comments yet.</p>
             )}
-            <div className="space-y-3 border-t border-border pt-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-semibold">{replyTarget ? "Replying to a comment" : "Add a reply"}</p>
-                  <p className="text-sm text-textMuted">
-                    {replyTarget
-                      ? `Your reply will nest under ${getReplyContextLabel(replyTarget) ?? "this comment"}.`
-                      : "Replying here keeps the thread connected to the original post."}
-                  </p>
-                </div>
-                {replyTarget ? (
-                  <Button variant="secondary" size="sm" onClick={() => setReplyTargetId(null)}>
-                    Clear target
-                  </Button>
-                ) : null}
-              </div>
-              <PostComposer
-                parentPost={post}
-                replyToPost={replyTarget && replyTarget.id !== post.id ? replyTarget : undefined}
-                mode="reply"
-                onPosted={() => setReplyTargetId(null)}
-              />
-            </div>
           </Card>
+          <div className="sticky bottom-20 z-30 rounded-[2rem] border border-border bg-canvas/95 p-3 shadow-panel backdrop-blur sm:bottom-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="font-semibold">{replyTarget ? "Replying to a comment" : "Add a reply"}</p>
+                <p className="text-sm text-textMuted">
+                  {replyTarget
+                    ? `Your reply will nest under ${getReplyContextLabel(replyTarget) ?? "this comment"}.`
+                    : "Replying here keeps the thread connected to the original post."}
+                </p>
+              </div>
+              {replyTarget ? (
+                <Button variant="secondary" size="sm" onClick={() => setReplyTargetId(null)}>
+                  Clear target
+                </Button>
+              ) : null}
+            </div>
+            <PostComposer
+              parentPost={post}
+              replyToPost={replyTarget && replyTarget.id !== post.id ? replyTarget : undefined}
+              mode="reply"
+              onPosted={() => setReplyTargetId(null)}
+            />
+          </div>
         </div>
       )}
     </PageFrame>
@@ -2434,9 +2564,11 @@ export function MarketPage() {
                   <Card key={option.id} className="space-y-4 p-4">
                     <div className="flex flex-col items-center gap-3 rounded-3xl border border-border bg-surfaceAlt/30 p-5 text-center">
                       <div className="rounded-[1.5rem] p-[4px]" style={getProfileBorderStyle(option.id)}>
-                        <div className="flex h-20 w-20 items-center justify-center rounded-[1.25rem] bg-surface text-xl font-bold">
-                          {profile.displayName.slice(0, 2).toUpperCase()}
-                        </div>
+                        <Avatar
+                          name={profile.displayName}
+                          src={profile.photoURL}
+                          className="h-20 w-20 rounded-[1.25rem]"
+                        />
                       </div>
                       <p className="font-semibold">{option.name}</p>
                     </div>

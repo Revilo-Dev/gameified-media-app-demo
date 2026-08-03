@@ -141,6 +141,10 @@ body {
   transform-origin: top center;
 }
 
+.tomato-hit-flash {
+  animation: tomato-hit-flash 700ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
 @keyframes timeline-post-enter {
   0% {
     opacity: 0;
@@ -152,5 +156,31 @@ body {
     opacity: 1;
     transform: translateY(0) scale(1);
     filter: saturate(1);
+  }
+}
+
+@keyframes tomato-hit-flash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.28);
+    border-color: rgba(248, 113, 113, 0.55);
+    background:
+      radial-gradient(circle at 14% 22%, rgba(239, 68, 68, 0.26), transparent 24%),
+      radial-gradient(circle at 82% 18%, rgba(185, 28, 28, 0.18), transparent 20%),
+      var(--surface);
+    transform: translateX(0);
+  }
+
+  35% {
+    transform: translateX(2px) rotate(-0.2deg);
+  }
+
+  70% {
+    box-shadow: 0 0 0 14px rgba(239, 68, 68, 0);
+  }
+
+  100% {
+    border-color: var(--border);
+    background: var(--surface);
+    transform: translateX(0);
   }
 }

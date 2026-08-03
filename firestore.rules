@@ -33,6 +33,7 @@ service cloud.firestore {
           "followerCount",
           "followingCount",
           "postCount",
+          "rottenTomatoCount",
           "updatedAt"
         ])
       );

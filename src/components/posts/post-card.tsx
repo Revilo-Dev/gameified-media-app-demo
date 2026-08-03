@@ -54,6 +54,7 @@ export function PostCard({
   const [submittingRottenTomato, setSubmittingRottenTomato] = useState(false);
   const [currentUserStars, setCurrentUserStars] = useState(0);
   const [hasThrownRottenTomato, setHasThrownRottenTomato] = useState(false);
+  const [isTomatoAnimating, setIsTomatoAnimating] = useState(false);
   const poll = post.poll ?? null;
   const pollEnded = poll ? new Date(poll.endsAt).getTime() <= Date.now() : false;
   const currentPollVote = poll && currentUserProfile ? poll.options.find((option) => poll.votes?.[option]?.includes(currentUserProfile.uid)) ?? null : null;
@@ -64,8 +65,7 @@ export function PostCard({
     ? getProfileBorderStyle(author.equippedProfileBorderId)
     : null;
   const imageUrls = (post.imageUrls?.length ? post.imageUrls : post.imageURL ? [post.imageURL] : []).slice(0, 3);
-  const tomatoDamageLevel = Math.min(3, post.rottenTomatoCount);
-  const hasTomatoDamage = tomatoDamageLevel > 0;
+  const previousTomatoCountRef = useRef(post.rottenTomatoCount);
 
   useEffect(() => {
     if (!user) {
@@ -130,6 +130,18 @@ export function PostCard({
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (post.rottenTomatoCount > previousTomatoCountRef.current) {
+      setIsTomatoAnimating(true);
+      const timeoutId = window.setTimeout(() => setIsTomatoAnimating(false), 700);
+      previousTomatoCountRef.current = post.rottenTomatoCount;
+      return () => window.clearTimeout(timeoutId);
+    }
+
+    previousTomatoCountRef.current = post.rottenTomatoCount;
+    return undefined;
+  }, [post.rottenTomatoCount]);
+
   const totalPollVotes = useMemo(() => {
     if (!poll) {
       return 0;
@@ -173,8 +185,8 @@ export function PostCard({
 
     setSubmittingRottenTomato(true);
     try {
-      const result = await throwRottenTomato(post.id, currentUserProfile);
-      toast.success(result.deleted ? "The post was deleted after 5 rotten tomatoes." : "Rotten tomato thrown");
+      await throwRottenTomato(post.id, currentUserProfile);
+      toast.success("Rotten tomato thrown");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Rotten tomato failed");
     } finally {
@@ -184,17 +196,7 @@ export function PostCard({
 
   return (
     <div className={`rounded-3xl p-px ${post.parentPostId ? "" : "timeline-post-enter"}`} style={cardBorderStyle ?? undefined}>
-      <Card className={`relative overflow-hidden border p-3 sm:p-4 ${hasTomatoDamage ? "border-red-500/35 bg-[radial-gradient(circle_at_top_left,rgba(239,68,68,0.18),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(127,29,29,0.16),transparent_42%)]" : "border-border"}`}>
-      {hasTomatoDamage ? (
-        <>
-          <div className={`pointer-events-none absolute -left-3 top-5 h-10 w-10 rounded-full bg-red-500/20 blur-md ${tomatoDamageLevel >= 2 ? "opacity-100" : "opacity-70"}`} />
-          <div className={`pointer-events-none absolute right-10 top-3 h-5 w-12 rotate-[-18deg] rounded-full bg-red-600/20 blur-sm ${tomatoDamageLevel >= 3 ? "opacity-100" : "opacity-60"}`} />
-          <div className="pointer-events-none absolute bottom-4 right-4 inline-flex items-center gap-1 rounded-full border border-red-400/25 bg-red-500/10 px-2 py-1 text-[11px] font-semibold text-red-200">
-            <TomatoIcon className="h-3.5 w-3.5" />
-            {post.rottenTomatoCount} hit{post.rottenTomatoCount === 1 ? "" : "s"}
-          </div>
-        </>
-      ) : null}
+      <Card className={`relative overflow-visible border border-border p-3 sm:p-4 ${isTomatoAnimating ? "tomato-hit-flash" : ""}`}>
       <div className="flex gap-3">
         <Avatar
           name={author?.displayName ?? "Unknown"}

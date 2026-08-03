@@ -66,6 +66,7 @@ export function InlineEntities({
   onMentionClick?: (value: string) => void;
   onHashtagClick?: (value: string) => void;
 }) {
+  const navigate = useNavigate();
   const parts = text.split(ENTITY_PATTERN);
 
   return (
@@ -99,7 +100,16 @@ export function InlineEntities({
           );
         }
 
-        return <span key={`${part}-${index}`} className="font-semibold text-[color:var(--accent)]">{part}</span>;
+        return (
+          <button
+            key={`${part}-${index}`}
+            type="button"
+            className="font-semibold text-[color:var(--accent)]"
+            onClick={() => navigate(`/explore?query=${encodeURIComponent(part)}`)}
+          >
+            {part}
+          </button>
+        );
       })}
     </span>
   );

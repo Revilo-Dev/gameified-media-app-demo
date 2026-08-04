@@ -13,10 +13,15 @@ export type ThemeMode =
   | "polarNight"
   | "roseQuartz"
   | "acidWash"
-  | "emberDusk";
+  | "emberDusk"
+  | "deepSea"
+  | "monochrome"
+  | "orchard"
+  | "ultraviolet"
+  | "copperline";
 
 export type BadgeRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
-export type CryptoCoinId = "wutax" | "galaxy" | "arc" | "nebula" | "spark";
+export type CryptoCoinId = "wutax" | "galaxy" | "arc" | "nebula" | "spark" | "lumen" | "titan";
 
 export type TimelineTab = "for-you" | "following";
 
@@ -72,6 +77,9 @@ export interface UserProfile {
   joinedAt: string;
   lastOnlineAt?: string;
   timeoutUntil?: string | null;
+  dailyClaimDate?: string | null;
+  dailyStreak?: number;
+  notificationPreferences?: Record<"replies" | "mentions" | "follows" | "reactions" | "rewards" | "reports", boolean>;
 }
 
 export interface Post {
@@ -127,6 +135,7 @@ export interface Conversation {
   unreadCount: number;
   lastMessage: string;
   updatedAt: string;
+  lastSenderId?: string | null;
 }
 
 export interface Message {
@@ -135,6 +144,7 @@ export interface Message {
   senderId: string;
   body: string;
   createdAt: string;
+  recipientId?: string;
 }
 
 export interface ShopItem {

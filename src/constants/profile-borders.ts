@@ -17,6 +17,8 @@ export const PROFILE_BORDER_OPTIONS: ProfileBorderOption[] = [
   { id: "animated-ember", name: "Ember Cycle", price: 1550, rarity: "legendary", description: "Molten orange-red animated edge.", preview: "linear-gradient(90deg, #fb923c, #ef4444, #f59e0b, #fb923c)", animated: true },
   { id: "animated-forest", name: "Forest Pulse", price: 1650, rarity: "legendary", description: "Deep green animated sweep with cool highlights.", preview: "linear-gradient(90deg, #22c55e, #14b8a6, #86efac, #22c55e)", animated: true },
   { id: "animated-galaxy", name: "Galaxy Spin", price: 1800, rarity: "legendary", description: "Purple-blue loop for loud profile presentation.", preview: "linear-gradient(90deg, #a78bfa, #60a5fa, #f472b6, #a78bfa)", animated: true },
+  { id: "animated-auric", name: "Auric Halo", price: 1950, rarity: "legendary", description: "Gold, ivory, and rose light orbiting the profile edge.", preview: "linear-gradient(90deg, #facc15, #fef3c7, #fb7185, #facc15)", animated: true },
+  { id: "animated-tidal", name: "Tidal Current", price: 2100, rarity: "legendary", description: "Aqua and deep-blue current with a clean moving edge.", preview: "linear-gradient(90deg, #67e8f9, #0ea5e9, #6366f1, #67e8f9)", animated: true },
 ];
 
 export function getProfileBorderOption(borderId: string | null | undefined) {

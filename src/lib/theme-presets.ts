@@ -276,4 +276,9 @@ export const themePresets: Record<ThemeMode, ThemeDefinition> = {
       border: "rgba(249, 115, 22, 0.18)",
     },
   },
+  deepSea: { label: "Deep Sea", description: "A deep blue-green theme with crisp marine highlights.", tokens: { text: "#e6fffb", accent: "#22d3ee", secondary: "#14b8a6", error: "#fb7185", info: "#38bdf8", background: "#04151d", onBackground: "#e6fffb", surface: "#092631", surfaceAlt: "#103944", textMuted: "#8db8c2", border: "rgba(34, 211, 238, 0.16)" } },
+  monochrome: { label: "Monochrome", description: "Neutral grayscale surfaces with a sharp electric blue accent.", tokens: { text: "#f5f5f5", accent: "#60a5fa", secondary: "#a3a3a3", error: "#fb7185", info: "#93c5fd", background: "#121212", onBackground: "#f5f5f5", surface: "#202020", surfaceAlt: "#303030", textMuted: "#b0b0b0", border: "rgba(255, 255, 255, 0.14)" } },
+  orchard: { label: "Orchard", description: "Fresh leaf greens with plum shadows and bright fruit accents.", tokens: { text: "#f1fff2", accent: "#84cc16", secondary: "#22c55e", error: "#fb7185", info: "#67e8f9", background: "#112019", onBackground: "#f1fff2", surface: "#1c3226", surfaceAlt: "#294634", textMuted: "#a7c5a9", border: "rgba(132, 204, 22, 0.18)" } },
+  ultraviolet: { label: "Ultraviolet", description: "High-contrast violet panels with cyan signal accents.", tokens: { text: "#f5f3ff", accent: "#a78bfa", secondary: "#22d3ee", error: "#fb7185", info: "#67e8f9", background: "#160d2a", onBackground: "#f5f3ff", surface: "#261342", surfaceAlt: "#38205b", textMuted: "#c7b8e4", border: "rgba(167, 139, 250, 0.2)" } },
+  copperline: { label: "Copperline", description: "Charcoal panels with copper and soft teal interface accents.", tokens: { text: "#fff7ed", accent: "#fb923c", secondary: "#2dd4bf", error: "#fb7185", info: "#67e8f9", background: "#1c1715", onBackground: "#fff7ed", surface: "#2d2521", surfaceAlt: "#42352e", textMuted: "#d4b9a7", border: "rgba(251, 146, 60, 0.18)" } },
 };

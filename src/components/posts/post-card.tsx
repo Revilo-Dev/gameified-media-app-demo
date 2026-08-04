@@ -341,7 +341,7 @@ export function PostCard({
             className="block w-full text-left"
             onClick={() => navigate(`/post/${post.parentPostId ?? post.id}`)}
           >
-            <p className="text-sm leading-6 text-text">
+            <p className="break-words [overflow-wrap:anywhere] text-sm leading-6 text-text">
               <InlineEntities text={post.content} />
             </p>
           </button>

@@ -340,7 +340,7 @@ export async function throwRottenTomato(postId: string, user: UserProfile) {
       createdAt: serverTimestamp(),
     });
     transaction.update(doc(db, COLLECTIONS.users, user.uid), {
-      gems: currentGems - tomatoCost,
+      gems: Number(Math.max(0, currentGems - tomatoCost).toFixed(2)),
       updatedAt: serverTimestamp(),
     });
     if (authorId) {

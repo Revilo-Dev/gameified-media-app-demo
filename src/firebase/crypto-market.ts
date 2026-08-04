@@ -12,22 +12,27 @@ export type CryptoMarketState = {
   coins: Record<CryptoCoinId, { currentValue: number; history: number[] }>;
 };
 
+function clampCryptoDecimal(value: number, minimum = 0.1) {
+  const numericValue = Number(value);
+  return Number(Math.max(minimum, Number.isFinite(numericValue) ? numericValue : minimum).toFixed(2));
+}
+
 export function getTradeImpact(volume: number) {
   return Math.min(0.12, Math.max(0.01, volume / 500));
 }
 
 export function getNextTradePrice(currentValue: number, direction: 1 | -1, volume: number) {
   const impact = getTradeImpact(volume);
-  return Math.max(0.1, Number((currentValue * (1 + direction * impact)).toFixed(2)));
+  return clampCryptoDecimal(currentValue * (1 + direction * impact));
 }
 
 export function getExecutedBuyCoinAmount(currentValue: number, volume: number) {
   const nextValue = getNextTradePrice(currentValue, 1, volume);
-  return Number((volume / nextValue).toFixed(2));
+  return clampCryptoDecimal(volume / nextValue, 0);
 }
 
 export function getExecutedSellGemValue(currentValue: number, coinAmount: number) {
-  return Number((coinAmount * currentValue).toFixed(2));
+  return clampCryptoDecimal(coinAmount * currentValue, 0);
 }
 
 export function createInitialCryptoMarketState(): CryptoMarketState {
@@ -39,6 +44,8 @@ export function createInitialCryptoMarketState(): CryptoMarketState {
       arc: { currentValue: 0.84, history: [0.69, 0.71, 0.74, 0.72, 0.76, 0.78, 0.8, 0.77, 0.81, 0.83, 0.79, 0.82, 0.85, 0.81, 0.8, 0.78, 0.82, 0.84] },
       nebula: { currentValue: 1.64, history: [1.28, 1.31, 1.35, 1.39, 1.42, 1.45, 1.49, 1.52, 1.56, 1.54, 1.58, 1.61, 1.59, 1.57, 1.6, 1.62, 1.63, 1.64] },
       spark: { currentValue: 0.52, history: [0.36, 0.38, 0.4, 0.41, 0.43, 0.44, 0.46, 0.45, 0.47, 0.48, 0.49, 0.47, 0.48, 0.5, 0.49, 0.51, 0.5, 0.52] },
+      lumen: { currentValue: 3.14, history: [2.72, 2.8, 2.88, 2.81, 2.94, 3.02, 3.09, 3.01, 3.16, 3.24, 3.19, 3.28, 3.22, 3.31, 3.18, 3.26, 3.2, 3.14] },
+      titan: { currentValue: 6.48, history: [5.7, 5.82, 5.96, 6.1, 6.02, 6.18, 6.26, 6.14, 6.32, 6.4, 6.51, 6.43, 6.58, 6.7, 6.62, 6.55, 6.59, 6.48] },
     },
   };
 }
@@ -47,7 +54,7 @@ function getNextCoinValue(value: number) {
   const magnitude = 0.01 + Math.random() * 0.07;
   const direction = Math.random() < 0.5 ? -1 : 1;
   const delta = 1 + direction * magnitude;
-  return Math.max(0.1, Number((value * delta).toFixed(2)));
+  return clampCryptoDecimal(value * delta);
 }
 
 export function rollCryptoMarket(previous: CryptoMarketState) {
@@ -75,24 +82,32 @@ export function normalizeMarketState(raw: unknown): CryptoMarketState {
     lastUpdatedAt: Number(data.lastUpdatedAt ?? fallback.lastUpdatedAt),
     coins: {
       wutax: {
-        currentValue: Number(data.coins?.wutax?.currentValue ?? fallbackCoins.wutax.currentValue),
-        history: Array.isArray(data.coins?.wutax?.history) ? data.coins.wutax.history.map(Number).slice(-CRYPTO_HISTORY_LENGTH) : fallbackCoins.wutax.history,
+        currentValue: clampCryptoDecimal(Number(data.coins?.wutax?.currentValue ?? fallbackCoins.wutax.currentValue)),
+        history: Array.isArray(data.coins?.wutax?.history) ? data.coins.wutax.history.map((value) => clampCryptoDecimal(Number(value))).slice(-CRYPTO_HISTORY_LENGTH) : fallbackCoins.wutax.history,
       },
       galaxy: {
-        currentValue: Number(data.coins?.galaxy?.currentValue ?? fallbackCoins.galaxy.currentValue),
-        history: Array.isArray(data.coins?.galaxy?.history) ? data.coins.galaxy.history.map(Number).slice(-CRYPTO_HISTORY_LENGTH) : fallbackCoins.galaxy.history,
+        currentValue: clampCryptoDecimal(Number(data.coins?.galaxy?.currentValue ?? fallbackCoins.galaxy.currentValue)),
+        history: Array.isArray(data.coins?.galaxy?.history) ? data.coins.galaxy.history.map((value) => clampCryptoDecimal(Number(value))).slice(-CRYPTO_HISTORY_LENGTH) : fallbackCoins.galaxy.history,
       },
       arc: {
-        currentValue: Number(data.coins?.arc?.currentValue ?? fallbackCoins.arc.currentValue),
-        history: Array.isArray(data.coins?.arc?.history) ? data.coins.arc.history.map(Number).slice(-CRYPTO_HISTORY_LENGTH) : fallbackCoins.arc.history,
+        currentValue: clampCryptoDecimal(Number(data.coins?.arc?.currentValue ?? fallbackCoins.arc.currentValue)),
+        history: Array.isArray(data.coins?.arc?.history) ? data.coins.arc.history.map((value) => clampCryptoDecimal(Number(value))).slice(-CRYPTO_HISTORY_LENGTH) : fallbackCoins.arc.history,
       },
       nebula: {
-        currentValue: Number(data.coins?.nebula?.currentValue ?? fallbackCoins.nebula.currentValue),
-        history: Array.isArray(data.coins?.nebula?.history) ? data.coins.nebula.history.map(Number).slice(-CRYPTO_HISTORY_LENGTH) : fallbackCoins.nebula.history,
+        currentValue: clampCryptoDecimal(Number(data.coins?.nebula?.currentValue ?? fallbackCoins.nebula.currentValue)),
+        history: Array.isArray(data.coins?.nebula?.history) ? data.coins.nebula.history.map((value) => clampCryptoDecimal(Number(value))).slice(-CRYPTO_HISTORY_LENGTH) : fallbackCoins.nebula.history,
       },
       spark: {
-        currentValue: Number(data.coins?.spark?.currentValue ?? fallbackCoins.spark.currentValue),
-        history: Array.isArray(data.coins?.spark?.history) ? data.coins.spark.history.map(Number).slice(-CRYPTO_HISTORY_LENGTH) : fallbackCoins.spark.history,
+        currentValue: clampCryptoDecimal(Number(data.coins?.spark?.currentValue ?? fallbackCoins.spark.currentValue)),
+        history: Array.isArray(data.coins?.spark?.history) ? data.coins.spark.history.map((value) => clampCryptoDecimal(Number(value))).slice(-CRYPTO_HISTORY_LENGTH) : fallbackCoins.spark.history,
+      },
+      lumen: {
+        currentValue: clampCryptoDecimal(Number(data.coins?.lumen?.currentValue ?? fallbackCoins.lumen.currentValue)),
+        history: Array.isArray(data.coins?.lumen?.history) ? data.coins.lumen.history.map((value) => clampCryptoDecimal(Number(value))).slice(-CRYPTO_HISTORY_LENGTH) : fallbackCoins.lumen.history,
+      },
+      titan: {
+        currentValue: clampCryptoDecimal(Number(data.coins?.titan?.currentValue ?? fallbackCoins.titan.currentValue)),
+        history: Array.isArray(data.coins?.titan?.history) ? data.coins.titan.history.map((value) => clampCryptoDecimal(Number(value))).slice(-CRYPTO_HISTORY_LENGTH) : fallbackCoins.titan.history,
       },
     },
   };
@@ -153,7 +168,7 @@ export async function moderateCryptoMarket(coinId: CryptoCoinId, direction: 1 | 
     const snapshot = await transaction.get(marketRef);
     const currentMarket = snapshot.exists() ? normalizeMarketState(snapshot.data()) : createInitialCryptoMarketState();
     const currentCoin = currentMarket.coins[coinId];
-    const nextValue = Math.max(0.1, Number((currentCoin.currentValue * (1 + direction * 0.05)).toFixed(2)));
+    const nextValue = clampCryptoDecimal(currentCoin.currentValue * (1 + direction * 0.05));
 
     transaction.set(marketRef, {
       lastUpdatedAt: Date.now(),

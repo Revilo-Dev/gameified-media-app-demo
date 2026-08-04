@@ -184,3 +184,13 @@ body {
     transform: translateX(0);
   }
 }
+
+.crypto-purchase-flash {
+  animation: crypto-purchase-flash 800ms ease-out;
+}
+
+@keyframes crypto-purchase-flash {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5); border-color: rgba(52, 211, 153, 0.8); }
+  45% { transform: scale(1.01); box-shadow: 0 0 0 12px rgba(52, 211, 153, 0); }
+  100% { transform: scale(1); border-color: var(--border); }
+}

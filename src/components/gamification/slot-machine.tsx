@@ -73,7 +73,7 @@ export function SlotMachine() {
   const [wagerInput, setWagerInput] = useState("10");
   const [lastResult, setLastResult] = useState<{ payout: number; multiplier: number; label: string } | null>(null);
   const gems = profile?.gems ?? 0;
-  const wager = Math.max(1, Math.floor(Number(wagerInput) || 10));
+  const wager = Math.max(10, Math.floor(Number(wagerInput) || 10));
 
   useEffect(() => {
     if (!user) {

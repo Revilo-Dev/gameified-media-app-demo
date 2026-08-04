@@ -19,19 +19,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
     clearLegacyAppCookies();
 
     return subscribeToAuthState(async (nextUser) => {
-      setUser(nextUser);
+      const verifiedUser = nextUser?.emailVerified ? nextUser : null;
+      setUser(verifiedUser);
       setIsLoading(false);
 
-      if (nextUser) {
-        writeCache("auth:user", nextUser);
+      if (verifiedUser) {
+        writeCache("auth:user", verifiedUser);
       } else {
         clearCache("auth:user");
       }
 
-      if (nextUser) {
+      if (verifiedUser) {
         try {
-          await ensureUserProfile(nextUser);
-          await touchUserLastOnline(nextUser.uid);
+          await ensureUserProfile(verifiedUser);
+          await touchUserLastOnline(verifiedUser.uid);
         } catch (error) {
           console.error("Failed to ensure user profile after auth state change", error);
         }

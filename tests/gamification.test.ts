@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getXpProgress, xpRequiredForLevel } from "@/constants/gamification";
 import { canAwardDailyPostXp, hasPostingCooldownElapsed, shouldAwardPostXp } from "@/features/gamification/anti-abuse";
-import { getExecutedBuyCoinAmount, getExecutedSellGemValue, getNextTradePrice } from "@/firebase/crypto-market";
+import { getExecutedBuyCoinAmount, getExecutedSellGemValue, getNextTradePrice, normalizeMarketState } from "@/firebase/crypto-market";
 
 describe("gamification helpers", () => {
   it("calculates required xp per level", () => {
@@ -32,5 +32,17 @@ describe("gamification helpers", () => {
     const saleValue = getExecutedSellGemValue(pumpedPrice, boughtCoins);
 
     expect(saleValue).toBeLessThanOrEqual(buyVolume);
+  });
+
+  it("clamps crypto values to two decimal places", () => {
+    const market = normalizeMarketState({
+      coins: {
+        wutax: { currentValue: 1.2345, history: [0.9876] },
+      },
+    });
+
+    expect(market.coins.wutax.currentValue).toBe(1.23);
+    expect(market.coins.wutax.history[0]).toBe(0.99);
+    expect(getExecutedSellGemValue(1.239, 2.345)).toBe(2.91);
   });
 });

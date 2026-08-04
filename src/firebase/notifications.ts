@@ -31,6 +31,20 @@ function normalizeCreatedAt(value: unknown) {
 }
 
 export async function createNotification(input: Omit<NotificationItem, "id" | "createdAt" | "read">) {
+  if (input.userId) {
+    const profile = await getUserProfile(input.userId);
+    const preferenceKey = input.type === "reply" ? "replies"
+      : input.type === "mention" ? "mentions"
+      : input.type === "follow" ? "follows"
+      : input.type === "reaction" ? "reactions"
+      : input.type === "report" ? "reports"
+      : input.type === "reward" || input.type === "level" ? "rewards"
+      : null;
+    if (preferenceKey && profile?.notificationPreferences?.[preferenceKey] === false) {
+      return;
+    }
+  }
+
   await addDoc(collection(db, COLLECTIONS.notifications), {
     ...input,
     read: false,

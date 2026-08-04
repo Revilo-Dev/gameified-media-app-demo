@@ -16,26 +16,31 @@ function buildHandle(displayName: string, uid: string) {
 
 function normalizeCoinHoldings(holdings: Partial<Record<CryptoCoinId, number>> | undefined) {
   return {
-    wutax: Number(holdings?.wutax ?? 0),
-    galaxy: Number(holdings?.galaxy ?? 0),
-    arc: Number(holdings?.arc ?? 0),
-    nebula: Number(holdings?.nebula ?? 0),
-    spark: Number(holdings?.spark ?? 0),
+    wutax: normalizeGemAmount(Number(holdings?.wutax ?? 0)),
+    galaxy: normalizeGemAmount(Number(holdings?.galaxy ?? 0)),
+    arc: normalizeGemAmount(Number(holdings?.arc ?? 0)),
+    nebula: normalizeGemAmount(Number(holdings?.nebula ?? 0)),
+    spark: normalizeGemAmount(Number(holdings?.spark ?? 0)),
+    lumen: normalizeGemAmount(Number(holdings?.lumen ?? 0)),
+    titan: normalizeGemAmount(Number(holdings?.titan ?? 0)),
   } satisfies Record<CryptoCoinId, number>;
 }
 
 function normalizeCoinInvestmentTotals(totals: Partial<Record<CryptoCoinId, number>> | undefined) {
   return {
-    wutax: Number(totals?.wutax ?? 0),
-    galaxy: Number(totals?.galaxy ?? 0),
-    arc: Number(totals?.arc ?? 0),
-    nebula: Number(totals?.nebula ?? 0),
-    spark: Number(totals?.spark ?? 0),
+    wutax: normalizeGemAmount(Number(totals?.wutax ?? 0)),
+    galaxy: normalizeGemAmount(Number(totals?.galaxy ?? 0)),
+    arc: normalizeGemAmount(Number(totals?.arc ?? 0)),
+    nebula: normalizeGemAmount(Number(totals?.nebula ?? 0)),
+    spark: normalizeGemAmount(Number(totals?.spark ?? 0)),
+    lumen: normalizeGemAmount(Number(totals?.lumen ?? 0)),
+    titan: normalizeGemAmount(Number(totals?.titan ?? 0)),
   } satisfies Record<CryptoCoinId, number>;
 }
 
 function normalizeGemAmount(value: number, minimum = 0) {
-  return Number(Math.max(minimum, value).toFixed(2));
+  const numericValue = Number(value);
+  return Number(Math.max(minimum, Number.isFinite(numericValue) ? numericValue : minimum).toFixed(2));
 }
 
 async function createUniqueHandle(baseHandle: string, currentUserId?: string) {
@@ -106,6 +111,9 @@ export async function ensureUserProfile(user: User) {
     joinedAt: new Date().toISOString(),
     lastOnlineAt: new Date().toISOString(),
     timeoutUntil: null,
+    dailyClaimDate: null,
+    dailyStreak: 0,
+    notificationPreferences: { replies: true, mentions: true, follows: true, reactions: true, rewards: true, reports: true },
   };
 
   await setDoc(ref, {
@@ -119,8 +127,19 @@ export async function ensureUserProfile(user: User) {
 
 export async function updateUserProfile(userId: string, updates: Partial<UserProfile>) {
   const ref = doc(db, COLLECTIONS.users, userId);
+  const normalizedUpdates = { ...updates };
+  if (typeof updates.gems === "number") {
+    normalizedUpdates.gems = normalizeGemAmount(updates.gems);
+  }
+  if (updates.coinHoldings) {
+    normalizedUpdates.coinHoldings = normalizeCoinHoldings(updates.coinHoldings);
+  }
+  if (updates.coinInvestmentTotals) {
+    normalizedUpdates.coinInvestmentTotals = normalizeCoinInvestmentTotals(updates.coinInvestmentTotals);
+  }
+
   await updateDoc(ref, {
-    ...updates,
+    ...normalizedUpdates,
     updatedAt: serverTimestamp(),
   });
 }
@@ -175,7 +194,7 @@ export async function addGemsToUser(userId: string, gemDelta: number) {
     }
 
     const currentGems = Number(snapshot.data().gems ?? 0);
-    const nextGems = Number(Math.max(0, currentGems + gemDelta).toFixed(2));
+    const nextGems = normalizeGemAmount(currentGems + gemDelta);
 
     transaction.update(ref, {
       gems: nextGems,
@@ -219,7 +238,7 @@ export async function buyCasinoCoin(userId: string) {
     }
 
     transaction.update(ref, {
-      gems: currentGems - 5,
+      gems: normalizeGemAmount(currentGems - 5),
       casinoCoins: Number(snapshot.data().casinoCoins ?? 0) + 1,
       updatedAt: serverTimestamp(),
     });
@@ -236,8 +255,8 @@ export async function investGemsInCoin(userId: string, coinId: CryptoCoinId, gem
       return;
     }
 
-    const safeGemCost = Number(Math.max(0.01, gemCost).toFixed(2));
-    const safeCoinAmount = Number(coinAmount.toFixed(2));
+    const safeGemCost = normalizeGemAmount(gemCost, 0.01);
+    const safeCoinAmount = normalizeGemAmount(coinAmount);
     const currentGems = Number(snapshot.data().gems ?? 0);
     if (currentGems < safeGemCost) {
       throw new Error(`You need ${safeGemCost} gems to invest in ${coinId} coin.`);
@@ -251,7 +270,7 @@ export async function investGemsInCoin(userId: string, coinId: CryptoCoinId, gem
     const currentInvestmentTotals = normalizeCoinInvestmentTotals((snapshot.data().coinInvestmentTotals ?? {}) as Partial<Record<CryptoCoinId, number>>);
 
     transaction.update(ref, {
-      gems: currentGems - safeGemCost,
+      gems: normalizeGemAmount(currentGems - safeGemCost),
       coinHoldings: {
         ...currentHoldings,
         [coinId]: Number((currentHoldings[coinId] + safeCoinAmount).toFixed(2)),
@@ -283,11 +302,11 @@ export async function sellCoinForGems(userId: string, coinId: CryptoCoinId, coin
       throw new Error(`You only have ${currentCoinAmount} ${coinId} to sell.`);
     }
     const currentInvestment = Number(currentInvestmentTotals[coinId] ?? 0);
-    const soldCostBasis = currentCoinAmount <= 0 ? 0 : Number(((currentInvestment / currentCoinAmount) * coinAmount).toFixed(2));
-    profit = Math.max(0, gemValue - soldCostBasis);
+    const soldCostBasis = currentCoinAmount <= 0 ? 0 : normalizeGemAmount((currentInvestment / currentCoinAmount) * coinAmount);
+    profit = normalizeGemAmount(gemValue - soldCostBasis);
 
     transaction.update(ref, {
-      gems: Number((Number(snapshot.data().gems ?? 0) + gemValue).toFixed(2)),
+      gems: normalizeGemAmount(Number(snapshot.data().gems ?? 0) + gemValue),
       coinHoldings: {
         ...currentHoldings,
         [coinId]: Number(Math.max(0, currentCoinAmount - coinAmount).toFixed(2)),
@@ -373,7 +392,7 @@ export async function executeCoinSale(userId: string, coinId: CryptoCoinId, coin
       throw new Error("User profile is missing.");
     }
 
-    const safeCoinAmount = Number(Math.max(0, coinAmount).toFixed(2));
+    const safeCoinAmount = normalizeGemAmount(coinAmount);
     if (safeCoinAmount <= 0) {
       throw new Error("Choose an amount greater than zero to sell.");
     }
@@ -391,8 +410,8 @@ export async function executeCoinSale(userId: string, coinId: CryptoCoinId, coin
     }
 
     const currentInvestment = Number(currentInvestmentTotals[coinId] ?? 0);
-    const soldCostBasis = currentCoinAmount <= 0 ? 0 : Number(((currentInvestment / currentCoinAmount) * safeCoinAmount).toFixed(2));
-    profit = Math.max(0, gemValue - soldCostBasis);
+    const soldCostBasis = currentCoinAmount <= 0 ? 0 : normalizeGemAmount((currentInvestment / currentCoinAmount) * safeCoinAmount);
+    profit = normalizeGemAmount(gemValue - soldCostBasis);
     const nextValue = getNextTradePrice(currentCoin.currentValue, -1, gemValue);
 
     transaction.update(userRef, {

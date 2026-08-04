@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Bell, Check, ChevronDown, ChevronUp, CircleDollarSign, Clock3, Crown, Gem, Globe2, Hammer, ImagePlus, Lock, MapPin, MessageCircle, Orbit, Palette, Search, Send, Sparkles, Star, Trash2, TriangleAlert, Unlock, UserPlus, Zap } from "lucide-react";
+import { Bell, Check, ChevronDown, ChevronUp, CircleDollarSign, Clock3, Crown, Eye, EyeOff, Gem, Globe2, Hammer, ImagePlus, Lock, MapPin, MessageCircle, Orbit, Palette, Search, Send, Sparkles, Star, Trash2, TriangleAlert, Unlock, UserPlus, Users, X, Zap } from "lucide-react";
 import { deleteDoc, doc, increment, updateDoc } from "firebase/firestore";
 import { auth, db } from "@/firebase/config";
 import { Card } from "@/components/common/card";
@@ -14,7 +14,8 @@ import { XpProgress } from "@/components/gamification/xp-progress";
 import { SlotMachine } from "@/components/gamification/slot-machine";
 import { CoinToss } from "@/components/gamification/coin-toss";
 import { DiceGame } from "@/components/gamification/dice-game";
-import { conversations, messages, shopItems, users } from "@/lib/demo-data";
+import { MinesGame } from "@/components/gamification/mines-game";
+import { shopItems, users } from "@/lib/demo-data";
 import { bannerPresets } from "@/lib/banner-presets";
 import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/auth";
 import { useAuth } from "@/app/auth-provider";
@@ -30,7 +31,8 @@ import { getNameColorStyle, getNameColorValue, NAME_COLOR_OPTIONS } from "@/cons
 import { PROFILE_BORDER_OPTIONS, getProfileBorderStyle } from "@/constants/profile-borders";
 import { themePresets } from "@/lib/theme-presets";
 import { readCache, writeCache } from "@/lib/persistent-cache";
-import { banUserAccount, resetAllCrypto, resetAllGems } from "@/firebase/functions";
+import { banUserAccount, claimDailyReward, resetAllCrypto, resetAllGems } from "@/firebase/functions";
+import { sendDirectMessage, startConversation, subscribeToAllConversations, subscribeToConversationMessages, subscribeToConversations } from "@/firebase/chat";
 import { createInitialCryptoMarketState, moderateCryptoMarket, subscribeToCryptoMarket, type CryptoMarketState } from "@/firebase/crypto-market";
 import { subscribeToBookmarkedPosts } from "@/firebase/bookmarks";
 import { markAllNotificationsRead, markNotificationRead, subscribeToNotifications } from "@/firebase/notifications";
@@ -157,6 +159,15 @@ function getNotificationVisual(type: NotificationItem["type"]) {
 
 const changelogEntries = [
   {
+    version: "V0.8",
+    date: "August 4, 2026",
+    items: [
+      "Crypto trading now confirms purchases with an in-card animation, and the market has expanded with Lumen and Titan alongside updated zero-balance migration support.",
+      "Five new purchasable themes, two animated nameplates, and two animated profile rings were added to the cosmetic market.",
+      "Daily rewards now build a visible streak, Mines joined the arcade, Explore gained batched post loading, and Messages now opens direct chats from mutual-follow avatars.",
+    ],
+  },
+  {
     version: "V0.73",
     date: "August 3, 2026",
     items: [
@@ -237,9 +248,10 @@ const BIO_MAX_LENGTH = 180;
 const LOCATION_MAX_LENGTH = 60;
 const DISPLAY_NAME_PATTERN = /^[A-Za-z0-9 ]+$/;
 const HANDLE_PATTERN = /^[a-z0-9_]+$/;
-const BASE_DAILY_GEM_REWARD = 25;
+const BASE_DAILY_GEM_REWARD = 100;
 const PREMIUM_DAILY_GEM_MULTIPLIER = 2;
 const FREE_THEME_IDS: ThemeMode[] = ["graphite", "mist"];
+const EXPLORE_PAGE_SIZE = 50;
 const THEME_MARKET_PRICES: Record<ThemeMode, number> = {
   graphite: 0,
   mist: 0,
@@ -256,6 +268,11 @@ const THEME_MARKET_PRICES: Record<ThemeMode, number> = {
   roseQuartz: 4500,
   acidWash: 4700,
   emberDusk: 4900,
+  deepSea: 5200,
+  monochrome: 5500,
+  orchard: 5800,
+  ultraviolet: 6100,
+  copperline: 6400,
 };
 
 function getOwnedThemeIds(profile: Pick<UserProfile, "ownedThemeIds" | "theme">) {
@@ -266,8 +283,8 @@ function formatInventoryRarityLabel(rarity: string) {
   return rarity.charAt(0).toUpperCase() + rarity.slice(1);
 }
 
-function getDailyGemReward(isPremium: boolean) {
-  return BASE_DAILY_GEM_REWARD * (isPremium ? PREMIUM_DAILY_GEM_MULTIPLIER : 1);
+function getDailyGemReward(isPremium: boolean, streak = 1) {
+  return (BASE_DAILY_GEM_REWARD + Math.max(0, streak - 1) * 25) * (isPremium ? PREMIUM_DAILY_GEM_MULTIPLIER : 1);
 }
 
 function ReplyCard({
@@ -323,6 +340,8 @@ export function ExplorePage() {
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [queryText, setQueryText] = useState(() => searchParams.get("query") ?? "");
   const [feedSort, setFeedSort] = useState<"recent" | "stars" | "comments">("recent");
+  const [visiblePostCount, setVisiblePostCount] = useState(EXPLORE_PAGE_SIZE);
+  const [peopleOpen, setPeopleOpen] = useState(true);
 
   useEffect(() => subscribeToPosts(setPosts), []);
   useEffect(() => subscribeToUserProfiles(setProfiles), []);
@@ -357,6 +376,8 @@ export function ExplorePage() {
 
     return nextPosts.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
   }, [feedSort, filteredPosts]);
+  const pagedPosts = useMemo(() => sortedPosts.slice(0, visiblePostCount), [sortedPosts, visiblePostCount]);
+  const canLoadMorePosts = sortedPosts.length > visiblePostCount;
   const filteredProfiles = useMemo(() => {
     if (!queryTokens.length) {
       return profiles.slice(0, 8);
@@ -368,7 +389,7 @@ export function ExplorePage() {
     }).slice(0, 8);
   }, [profiles, queryTokens]);
   const replyContextLabels = useMemo(() => {
-    return filteredPosts.reduce<Record<string, string | null>>((accumulator, post) => {
+    return pagedPosts.reduce<Record<string, string | null>>((accumulator, post) => {
       const replyTargetId = post.replyToPostId ?? post.parentPostId;
       if (!replyTargetId) {
         accumulator[post.id] = null;
@@ -380,7 +401,7 @@ export function ExplorePage() {
       accumulator[post.id] = replyAuthor ? `@${replyAuthor.handle}` : null;
       return accumulator;
     }, {});
-  }, [filteredPosts, postLookup, profiles]);
+  }, [pagedPosts, postLookup, profiles]);
   const trendingTags = useMemo(() => {
     const counts = posts.reduce<Record<string, number>>((accumulator, post) => {
       post.tags.forEach((tag) => {
@@ -420,6 +441,10 @@ export function ExplorePage() {
     }
     setSearchParams(nextParams, { replace: true });
   }, [queryText, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    setVisiblePostCount(EXPLORE_PAGE_SIZE);
+  }, [feedSort, normalizedQuery]);
 
   return (
     <PageFrame title="Explore" subtitle="Search users, posts, hashtags, and replies from one discovery surface." titleIcon={Search}>
@@ -464,14 +489,14 @@ export function ExplorePage() {
             </button>
           ))}
         </div>
-        <div className="flex items-center justify-between gap-3">
+        <button type="button" className="flex w-full items-center justify-between gap-3 text-left" onClick={() => setPeopleOpen((value) => !value)}>
           <div>
             <p className="font-semibold">People</p>
             <p className="text-sm text-textMuted">Open a profile directly from search results.</p>
           </div>
-          <span className="text-xs text-textMuted">{filteredProfiles.length} result{filteredProfiles.length === 1 ? "" : "s"}</span>
-        </div>
-        {filteredProfiles.length ? (
+          <span className="inline-flex items-center gap-2 text-xs text-textMuted">{filteredProfiles.length} result{filteredProfiles.length === 1 ? "" : "s"}{peopleOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</span>
+        </button>
+        {peopleOpen && filteredProfiles.length ? (
           <div className="grid gap-3 md:grid-cols-2">
             {filteredProfiles.map((profile) => (
               <button
@@ -489,13 +514,13 @@ export function ExplorePage() {
               </button>
             ))}
           </div>
-        ) : (
+        ) : peopleOpen ? (
           <div className="rounded-3xl border border-dashed border-border p-5 text-sm text-textMuted">No users matched that search yet.</div>
-        )}
+        ) : null}
       </Card>
 
       <div className="space-y-4">
-        {sortedPosts.length ? sortedPosts.map((post, index) => (
+        {pagedPosts.length ? pagedPosts.map((post, index) => (
           <PostCard
             key={post.id}
             post={post}
@@ -505,6 +530,17 @@ export function ExplorePage() {
         )) : (
           <Card className="p-6 text-sm text-textMuted">No posts matched that search yet.</Card>
         )}
+        {canLoadMorePosts ? (
+          <Card className="p-4">
+            <button
+              type="button"
+              className="w-full rounded-2xl border border-border bg-surface px-4 py-3 text-sm font-semibold transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+              onClick={() => setVisiblePostCount((current) => current + EXPLORE_PAGE_SIZE)}
+            >
+              Load more posts
+            </button>
+          </Card>
+        ) : null}
       </div>
     </PageFrame>
   );
@@ -533,6 +569,9 @@ export function ProfilePage() {
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [followProfiles, setFollowProfiles] = useState<Record<string, UserProfile | null>>({});
   const [market, setMarket] = useState<CryptoMarketState>(() => createInitialCryptoMarketState());
+  const [editingModeratorValue, setEditingModeratorValue] = useState<"level" | "gems" | null>(null);
+  const [moderatorValue, setModeratorValue] = useState("");
+  const [isSavingModeratorValue, setIsSavingModeratorValue] = useState(false);
 
   useEffect(() => {
     if (!authUser) {
@@ -695,6 +734,43 @@ export function ProfilePage() {
   );
   const timeoutLabel = getTimeoutRemainingLabel(user?.timeoutUntil);
   const canModerateInventory = Boolean(currentUserProfile?.isModerator);
+  const canEditModeratorValues = Boolean(currentUserProfile?.isModerator && !isOwnProfile);
+
+  function beginModeratorValueEdit(field: "level" | "gems") {
+    if (!user || !canEditModeratorValues) {
+      return;
+    }
+
+    setEditingModeratorValue(field);
+    setModeratorValue(field === "level" ? String(user.level) : String(user.gems));
+  }
+
+  async function saveModeratorValue(field: "level" | "gems") {
+    if (!user) {
+      return;
+    }
+
+    const parsedValue = Number(moderatorValue);
+    const value = field === "level" ? Math.floor(parsedValue) : Number(parsedValue.toFixed(2));
+    const minimum = field === "level" ? 1 : 0;
+
+    if (!Number.isFinite(value) || value < minimum) {
+      toast.error(field === "level" ? "Level must be a whole number of at least 1." : "Gems must be a non-negative number.");
+      return;
+    }
+
+    setIsSavingModeratorValue(true);
+    try {
+      await updateUserProfile(user.uid, field === "level" ? { level: value } : { gems: value });
+      setEditingModeratorValue(null);
+      toast.success(`${field === "level" ? "Level" : "Gems"} updated`);
+    } catch (error) {
+      console.error(`Failed to update ${field}`, error);
+      toast.error(getFirebaseErrorMessage(error));
+    } finally {
+      setIsSavingModeratorValue(false);
+    }
+  }
 
   async function removeOwnedNameColor(colorId: string) {
     if (!canModerateInventory || !user) {
@@ -819,6 +895,10 @@ export function ProfilePage() {
                     </span>
                   ) : null}
                   <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-1 text-xs">
+                    <Zap size={12} className="text-amber-300" />
+                    {user.dailyStreak ?? 0} day streak
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-1 text-xs">
                     <Clock3 size={12} />
                     {user.isPremium && user.isPrivate ? "Last online hidden" : formatLastOnline(user.lastOnlineAt)}
                   </span>
@@ -830,10 +910,21 @@ export function ProfilePage() {
                 <p className="text-xs text-textMuted">Leaderboard</p>
                 <p className="mt-1 font-semibold">{leaderboardRank ? `#${leaderboardRank}` : "Unranked"}</p>
               </div>
-              <div className="rounded-2xl border border-border bg-surfaceAlt/50 px-3 py-2">
-                <p className="text-xs text-textMuted">Gems</p>
-                <p className="mt-1 font-semibold tabular-nums">{formatAmount(user.gems)}</p>
-              </div>
+              {editingModeratorValue === "gems" ? (
+                <form className="rounded-2xl border border-[color:var(--accent)] bg-surfaceAlt/50 px-2 py-2" onSubmit={(event) => { event.preventDefault(); void saveModeratorValue("gems"); }}>
+                  <label htmlFor="moderator-gems" className="text-xs text-textMuted">Gems</label>
+                  <div className="mt-1 flex items-center gap-1">
+                    <input id="moderator-gems" autoFocus inputMode="decimal" min="0" step="0.01" value={moderatorValue} onChange={(event) => setModeratorValue(event.target.value)} className="min-w-0 flex-1 bg-transparent font-semibold tabular-nums outline-none" />
+                    <button type="submit" disabled={isSavingModeratorValue} className="rounded p-1 text-emerald-400 hover:bg-surface" aria-label="Save gems" title="Save gems"><Check size={15} /></button>
+                    <button type="button" disabled={isSavingModeratorValue} className="rounded p-1 text-textMuted hover:bg-surface hover:text-text" aria-label="Cancel gem edit" title="Cancel" onClick={() => setEditingModeratorValue(null)}><X size={15} /></button>
+                  </div>
+                </form>
+              ) : (
+                <button type="button" className={`rounded-2xl border border-border bg-surfaceAlt/50 px-3 py-2 text-left ${canEditModeratorValues ? "transition hover:border-[color:var(--accent)]" : "cursor-default"}`} onClick={() => beginModeratorValueEdit("gems")} disabled={!canEditModeratorValues} title={canEditModeratorValues ? "Click to edit gems" : undefined}>
+                  <p className="text-xs text-textMuted">Gems</p>
+                  <p className="mt-1 font-semibold tabular-nums">{formatAmount(user.gems)}</p>
+                </button>
+              )}
             </div>
           </div>
 
@@ -1100,16 +1191,17 @@ export function SettingsPage() {
   const ownedNameColors = (profile?.ownedNameColorIds ?? ["default"])
     .map((colorId) => NAME_COLOR_OPTIONS.find((item) => item.id === colorId))
     .filter((option): option is (typeof NAME_COLOR_OPTIONS)[number] => Boolean(option));
+  const notificationPreferences = profile?.notificationPreferences ?? { replies: true, mentions: true, follows: true, reactions: true, rewards: true, reports: true };
 
   return (
     <PageFrame title="Settings" subtitle="Appearance, account controls, and release notes live here.">
       <div className="space-y-5">
-        <Card className="space-y-4 p-6">
-          <div className="flex items-center gap-2">
+        <details open className="rounded-2xl border border-border bg-surface p-6">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2"><div className="flex items-center gap-2">
             <Palette size={18} />
             <h2 className="text-lg font-semibold">Appearance</h2>
-          </div>
-          <div className="grid gap-3">
+          </div><ChevronDown size={18} /></summary>
+          <div className="mt-4 grid gap-3">
             {availableThemes.map(([themeKey, definition]) => {
               const isActive = theme === themeKey;
               const isOwned = ownedThemeIds.includes(themeKey as ThemeMode);
@@ -1182,21 +1274,20 @@ export function SettingsPage() {
               className="w-full accent-[color:var(--accent)]"
             />
           </div>
-        </Card>
+        </details>
 
-        <Card className="space-y-4 p-6">
-          <h2 className="text-lg font-semibold">Account</h2>
-          <p className="text-sm text-textMuted">Profile, privacy, and media settings are now managed from the profile editor.</p>
-          <div className="flex flex-wrap gap-3">
-            <Button variant="secondary">Manage profile</Button>
-            <Button variant="secondary">Privacy</Button>
-            <Button variant="secondary">Notifications</Button>
+        <details open className="rounded-2xl border border-border bg-surface">
+          <summary className="flex cursor-pointer list-none items-center justify-between p-5"><span className="text-lg font-semibold">Account</span><ChevronDown size={18} /></summary>
+          <div className="space-y-5 border-t border-border p-5">
+            <p className="text-sm text-textMuted">Profile, privacy, and media settings are managed from your profile editor.</p>
+            <Link to={profile ? `/profile/${profile.handle}` : "/"} className="inline-flex rounded-full border border-border bg-surfaceAlt px-4 py-2 text-sm font-semibold">Manage profile</Link>
+            <div className="space-y-3"><div><p className="font-semibold">Notifications</p><p className="text-sm text-textMuted">Choose the activity that should reach your inbox.</p></div><div className="grid gap-2 sm:grid-cols-2">{([ ["replies", "Replies"], ["mentions", "Mentions"], ["follows", "New followers"], ["reactions", "Ratings and reactions"], ["rewards", "Rewards and level-ups"], ["reports", "Moderator reports"] ] as const).map(([key, label]) => <label key={key} className="flex items-center gap-3 rounded-xl border border-border bg-surfaceAlt/30 px-3 py-2 text-sm"><input type="checkbox" checked={notificationPreferences[key]} disabled={!user || !profile} onChange={(event) => { if (user && profile) void updateUserProfile(user.uid, { notificationPreferences: { ...notificationPreferences, [key]: event.target.checked } }); }} className="h-4 w-4 accent-[color:var(--accent)]" />{label}</label>)}</div></div>
           </div>
-        </Card>
+        </details>
 
-        <Card className="space-y-4 p-6">
-          <h2 className="text-lg font-semibold">Changelog</h2>
-          <div className="space-y-4">
+        <details open className="rounded-2xl border border-border bg-surface p-6">
+          <summary className="flex cursor-pointer list-none items-center justify-between"><h2 className="text-lg font-semibold">Changelog</h2><ChevronDown size={18} /></summary>
+          <div className="mt-4 space-y-4">
             {changelogEntries.map((entry) => (
               <div key={entry.version} className="rounded-3xl border border-border bg-surfaceAlt/40 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1211,7 +1302,7 @@ export function SettingsPage() {
               </div>
             ))}
           </div>
-        </Card>
+        </details>
       </div>
     </PageFrame>
   );
@@ -1219,15 +1310,34 @@ export function SettingsPage() {
 
 function AuthShell({
   title,
+  subtitle,
   children,
 }: {
   title: string;
+  subtitle: string;
   children: ReactNode;
 }) {
   return (
-    <div className="mx-auto grid min-h-screen max-w-5xl place-items-center px-4 py-10">
-      <Card className="w-full max-w-lg space-y-6 p-6">
-        <h1 className="text-3xl font-bold">{title}</h1>
+    <div className="mx-auto grid min-h-screen max-w-6xl items-center gap-10 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_28rem] lg:px-8">
+      <div className="hidden max-w-md space-y-6 lg:block">
+        <Link to="/" className="inline-flex items-center gap-2 text-lg font-bold">
+          <span className="grid h-10 w-10 place-items-center rounded-xl bg-accent text-white"><Orbit size={22} /></span>
+          Nebula Social
+        </Link>
+        <div className="space-y-3">
+          <p className="text-4xl font-bold leading-tight">Welcome to Nebula.</p>
+          <p className="max-w-sm text-base leading-7 text-textMuted">A gamified social networking platform.</p>
+        </div>
+      </div>
+      <Card className="w-full space-y-6 rounded-2xl border border-border p-5 shadow-panel sm:p-7">
+        <Link to="/" className="inline-flex items-center gap-2 text-base font-bold lg:hidden">
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent text-white"><Orbit size={18} /></span>
+          Nebula
+        </Link>
+        <div className="space-y-2">
+          <h1 className="text-2xl font-bold sm:text-3xl">{title}</h1>
+          <p className="text-sm leading-6 text-textMuted">{subtitle}</p>
+        </div>
         {children}
       </Card>
     </div>
@@ -1616,6 +1726,7 @@ function ModeratorBanButton({ targetUserId }: { targetUserId: string }) {
 }
 
 const MODERATOR_TIMEOUT_OPTIONS = [
+  { label: "Remove timeout", durationMs: null },
   { label: "1h", durationMs: 60 * 60 * 1000 },
   { label: "3h", durationMs: 3 * 60 * 60 * 1000 },
   { label: "6h", durationMs: 6 * 60 * 60 * 1000 },
@@ -1656,9 +1767,11 @@ function ModeratorTimeoutButton({ targetUserId }: { targetUserId: string }) {
         setIsUpdating(true);
         try {
           await updateUserProfile(targetUserId, {
-            timeoutUntil: new Date(Date.now() + selected.durationMs).toISOString(),
+            timeoutUntil: selected.durationMs === null ? null : new Date(Date.now() + selected.durationMs).toISOString(),
           });
-          toast.success("User timed out", { description: `${selected.label} applied.` });
+          toast.success(selected.durationMs === null ? "Timeout removed" : "User timed out", {
+            description: selected.durationMs === null ? "The user can post again." : `${selected.label} applied.`,
+          });
         } catch (error) {
           console.error("Failed to time out user", error);
           toast.error(getFirebaseErrorMessage(error));
@@ -1740,6 +1853,7 @@ export function PremiumPage() {
 export function LoginPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [showPassword, setShowPassword] = useState(false);
   const form = useForm<z.infer<typeof loginSchema>>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: "", password: "" },
@@ -1752,9 +1866,9 @@ export function LoginPage() {
   }, [navigate, user]);
 
   return (
-    <AuthShell title="Login">
+    <AuthShell title="Welcome back" subtitle="Sign in to pick up where you left off.">
       <form
-        className="space-y-4"
+        className="space-y-5"
         onSubmit={form.handleSubmit(async (values) => {
           try {
             const credential = await signInWithEmail(values.email, values.password);
@@ -1769,14 +1883,32 @@ export function LoginPage() {
           }
         })}
       >
-        <input {...form.register("email")} type="email" placeholder="Email" className="w-full rounded-2xl border border-border bg-transparent px-4 py-3" />
-        <input {...form.register("password")} type="password" placeholder="Password" className="w-full rounded-2xl border border-border bg-transparent px-4 py-3" />
-        {form.formState.errors.email || form.formState.errors.password ? <p className="text-sm text-red-500">Enter a valid email and password.</p> : null}
+        <div className="space-y-2">
+          <label htmlFor="login-email" className="text-sm font-semibold">Email address</label>
+          <input id="login-email" {...form.register("email")} autoComplete="email" type="email" placeholder="you@example.com" className="w-full rounded-xl border border-border bg-transparent px-4 py-3 outline-none transition focus:border-accent focus:ring-2 focus:ring-[color:var(--accent)]/20" />
+          {form.formState.errors.email ? <p className="text-sm text-red-400">Enter a valid email address.</p> : null}
+        </div>
+        <div className="space-y-2">
+          <label htmlFor="login-password" className="text-sm font-semibold">Password</label>
+          <div className="relative">
+            <input id="login-password" {...form.register("password")} autoComplete="current-password" type={showPassword ? "text" : "password"} placeholder="Your password" className="w-full rounded-xl border border-border bg-transparent py-3 pl-4 pr-12 outline-none transition focus:border-accent focus:ring-2 focus:ring-[color:var(--accent)]/20" />
+            <button type="button" aria-label={showPassword ? "Hide password" : "Show password"} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-textMuted hover:bg-surfaceAlt hover:text-text" onClick={() => setShowPassword((visible) => !visible)}>
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+          {form.formState.errors.password ? <p className="text-sm text-red-400">Enter your password.</p> : null}
+        </div>
+        <Button type="submit" className="w-full" size="lg" disabled={form.formState.isSubmitting}>
+          {form.formState.isSubmitting ? "Signing in..." : "Sign in"}
+        </Button>
+        <div className="relative py-1 text-center text-xs text-textMuted before:absolute before:left-0 before:right-0 before:top-1/2 before:border-t before:border-border">
+          <span className="relative bg-surface px-3">or continue with</span>
+        </div>
         <div className="flex gap-3">
-          <Button type="submit" className="flex-1">Login</Button>
           <Button
             type="button"
             variant="secondary"
+            className="w-full"
             onClick={async () => {
               try {
                 const credential = await signInWithGoogle();
@@ -1791,11 +1923,11 @@ export function LoginPage() {
               }
             }}
           >
-            Google
+            Continue with Google
           </Button>
         </div>
-        <p className="text-sm text-textMuted">
-          No account? <Link className="text-accent" to="/signup">Create one</Link>
+        <p className="text-center text-sm text-textMuted">
+          New to PulseArc? <Link className="font-semibold text-accent hover:underline" to="/signup">Create an account</Link>
         </p>
       </form>
     </AuthShell>
@@ -1805,6 +1937,7 @@ export function LoginPage() {
 export function SignupPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [showPassword, setShowPassword] = useState(false);
   const form = useForm<z.infer<typeof signupSchema>>({
     resolver: zodResolver(signupSchema),
     defaultValues: { displayName: "", email: "", password: "" },
@@ -1817,15 +1950,14 @@ export function SignupPage() {
   }, [navigate, user]);
 
   return (
-    <AuthShell title="Sign Up">
+    <AuthShell title="Create your account" subtitle="Sign up for Nebula.">
       <form
-        className="space-y-4"
+        className="space-y-5"
         onSubmit={form.handleSubmit(async (values) => {
           try {
-            const credential = await signUpWithEmail(values.email, values.password, values.displayName);
-            await ensureUserProfile(credential.user);
-            toast.success("Account created");
-            navigate("/");
+            await signUpWithEmail(values.email.trim(), values.password, values.displayName.trim());
+            toast.success("Check your email", { description: "Verify your email address, then sign in to finish creating your account." });
+            navigate("/login");
           } catch (error) {
             console.error("Failed signup", error);
             toast.error("Account creation failed", {
@@ -1834,14 +1966,37 @@ export function SignupPage() {
           }
         })}
       >
-        <input {...form.register("displayName")} placeholder="Display name" className="w-full rounded-2xl border border-border bg-transparent px-4 py-3" />
-        <input {...form.register("email")} type="email" placeholder="Email" className="w-full rounded-2xl border border-border bg-transparent px-4 py-3" />
-        <input {...form.register("password")} type="password" placeholder="Password" className="w-full rounded-2xl border border-border bg-transparent px-4 py-3" />
+        <div className="space-y-2">
+          <label htmlFor="signup-name" className="text-sm font-semibold">Display name</label>
+          <input id="signup-name" {...form.register("displayName")} autoComplete="name" placeholder="Your name" className="w-full rounded-xl border border-border bg-transparent px-4 py-3 outline-none transition focus:border-accent focus:ring-2 focus:ring-[color:var(--accent)]/20" />
+          {form.formState.errors.displayName ? <p className="text-sm text-red-400">Use 2 to 25 characters.</p> : null}
+        </div>
+        <div className="space-y-2">
+          <label htmlFor="signup-email" className="text-sm font-semibold">Email address</label>
+          <input id="signup-email" {...form.register("email")} autoComplete="email" type="email" placeholder="you@example.com" className="w-full rounded-xl border border-border bg-transparent px-4 py-3 outline-none transition focus:border-accent focus:ring-2 focus:ring-[color:var(--accent)]/20" />
+          {form.formState.errors.email ? <p className="text-sm text-red-400">Enter a valid email address.</p> : null}
+        </div>
+        <div className="space-y-2">
+          <label htmlFor="signup-password" className="text-sm font-semibold">Password</label>
+          <div className="relative">
+            <input id="signup-password" {...form.register("password")} autoComplete="new-password" type={showPassword ? "text" : "password"} placeholder="At least 6 characters" className="w-full rounded-xl border border-border bg-transparent py-3 pl-4 pr-12 outline-none transition focus:border-accent focus:ring-2 focus:ring-[color:var(--accent)]/20" />
+            <button type="button" aria-label={showPassword ? "Hide password" : "Show password"} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-textMuted hover:bg-surfaceAlt hover:text-text" onClick={() => setShowPassword((visible) => !visible)}>
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+          {form.formState.errors.password ? <p className="text-sm text-red-400">Use at least 6 characters.</p> : null}
+        </div>
+        <Button type="submit" className="w-full" size="lg" disabled={form.formState.isSubmitting}>
+          {form.formState.isSubmitting ? "Creating account..." : "Create account"}
+        </Button>
+        <div className="relative py-1 text-center text-xs text-textMuted before:absolute before:left-0 before:right-0 before:top-1/2 before:border-t before:border-border">
+          <span className="relative bg-surface px-3">or continue with</span>
+        </div>
         <div className="flex gap-3">
-          <Button type="submit" className="flex-1">Create account</Button>
           <Button
             type="button"
             variant="secondary"
+            className="w-full"
             onClick={async () => {
               try {
                 const credential = await signInWithGoogle();
@@ -1856,11 +2011,11 @@ export function SignupPage() {
               }
             }}
           >
-            Google
+            Continue with Google
           </Button>
         </div>
-        <p className="text-sm text-textMuted">
-          Already have an account? <Link className="text-accent" to="/login">Log in</Link>
+        <p className="text-center text-sm text-textMuted">
+          Already have an account? <Link className="font-semibold text-accent hover:underline" to="/login">Sign in</Link>
         </p>
       </form>
     </AuthShell>
@@ -2049,85 +2204,86 @@ export function PostPage() {
 
 export function ChatPage() {
   const { user } = useAuth();
-  const userId = user?.uid ?? "demo-user";
-  const chatCacheKey = `cache:chat:${userId}`;
-  const [chatState, setChatState] = useState<{ conversations: Conversation[]; messages: Message[] }>(() => (
-    readCache<{ conversations: Conversation[]; messages: Message[] }>(chatCacheKey) ?? {
-      conversations,
-      messages,
-    }
-  ));
-  const [activeConversationId, setActiveConversationId] = useState(chatState.conversations[0]?.id ?? "");
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profiles, setProfiles] = useState<UserProfile[]>([]);
+  const [followingIds, setFollowingIds] = useState<string[]>([]);
+  const [followerIds, setFollowerIds] = useState<string[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState("");
   const [draft, setDraft] = useState("");
-  const activeConversation = chatState.conversations.find((conversation) => conversation.id === activeConversationId) ?? chatState.conversations[0];
-  const activeMessages = activeConversation
-    ? chatState.messages.filter((message) => message.conversationId === activeConversation.id)
-    : [];
+  const [isStartingChat, setIsStartingChat] = useState(false);
+  const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId) ?? conversations[0] ?? null;
+  const profilesById = useMemo(() => new Map(profiles.map((item) => [item.uid, item])), [profiles]);
+  const mutualProfiles = useMemo(() => profiles.filter((item) => followingIds.includes(item.uid) && followerIds.includes(item.uid)), [followerIds, followingIds, profiles]);
+  const isModerator = Boolean(profile?.isModerator);
 
   useEffect(() => {
-    const nextCacheKey = `cache:chat:${userId}`;
-    const cachedChat = readCache<{ conversations: Conversation[]; messages: Message[] }>(nextCacheKey);
-    const nextState = cachedChat ?? { conversations, messages };
-    setChatState(nextState);
-    setActiveConversationId(nextState.conversations[0]?.id ?? "");
-  }, [userId]);
-
-  useEffect(() => {
-    writeCache(chatCacheKey, chatState);
-  }, [chatCacheKey, chatState]);
-
-  const sendMessage = () => {
-    if (!activeConversation || !draft.trim()) {
+    if (!user) {
+      setProfile(null);
+      setConversations([]);
       return;
     }
+    return subscribeToUserProfileById(user.uid, setProfile);
+  }, [user]);
 
-    const body = draft.trim();
-    const createdAt = new Date().toISOString();
-    const nextMessage: Message = {
-      id: `local-${createdAt}`,
-      conversationId: activeConversation.id,
-      senderId: userId,
-      body,
-      createdAt,
-    };
+  useEffect(() => {
+    if (!user) return;
+    return subscribeToUserProfiles(setProfiles);
+  }, [user]);
 
-    setChatState((current) => ({
-      conversations: current.conversations.map((conversation) => (
-        conversation.id === activeConversation.id
-          ? { ...conversation, lastMessage: body, updatedAt: createdAt, unreadCount: 0 }
-          : conversation
-      )),
-      messages: [...current.messages, nextMessage],
-    }));
-    setDraft("");
+  useEffect(() => {
+    if (!user) return;
+    const unsubscribeFollowing = subscribeToFollowingIds(user.uid, setFollowingIds);
+    const unsubscribeFollowers = subscribeToFollowerIds(user.uid, setFollowerIds);
+    return () => { unsubscribeFollowing(); unsubscribeFollowers(); };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    return isModerator ? subscribeToAllConversations(setConversations) : subscribeToConversations(user.uid, setConversations);
+  }, [isModerator, user]);
+
+  useEffect(() => {
+    if (!activeConversationId && conversations[0]) setActiveConversationId(conversations[0].id);
+    if (activeConversationId && !conversations.some((item) => item.id === activeConversationId)) setActiveConversationId(conversations[0]?.id ?? "");
+  }, [activeConversationId, conversations]);
+
+  useEffect(() => subscribeToConversationMessages(activeConversation?.id ?? null, setMessages), [activeConversation?.id]);
+
+  const sendMessage = async () => {
+    if (!user || !activeConversation || !draft.trim()) {
+      return;
+    }
+    try { await sendDirectMessage(activeConversation, user.uid, draft); setDraft(""); } catch (error) { toast.error(getFirebaseErrorMessage(error)); }
   };
 
-  return (
-    <PageFrame title="Chat" subtitle="One-to-one conversations with persistent local message history.">
-      <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <Card className="overflow-hidden p-2">
-          {chatState.conversations.map((conversation) => (
-            <button
-              key={conversation.id}
-              type="button"
-              onClick={() => setActiveConversationId(conversation.id)}
-              className={`block w-full rounded-lg px-3 py-3 text-left transition ${
-                conversation.id === activeConversation?.id ? "bg-surfaceAlt text-text" : "text-textMuted hover:bg-surface"
-              }`}
-            >
-              <span className="block font-semibold">{conversation.title}</span>
-              <span className="mt-1 block truncate text-sm">{conversation.lastMessage}</span>
-            </button>
-          ))}
-        </Card>
+  async function beginChat(contact: UserProfile) {
+    if (!user) return;
+    setIsStartingChat(true);
+    try { setActiveConversationId(await startConversation(user.uid, contact.uid, contact.displayName)); } catch (error) { toast.error(getFirebaseErrorMessage(error)); } finally { setIsStartingChat(false); }
+  }
 
-        <Card className="flex min-h-[520px] flex-col overflow-hidden">
-          <div className="border-b border-border px-5 py-4">
-            <h2 className="font-semibold">{activeConversation?.title ?? "Messages"}</h2>
+  function conversationTitle(conversation: Conversation) {
+    const otherId = conversation.participantIds.find((id) => id !== user?.uid) ?? conversation.participantIds[0];
+    return profilesById.get(otherId)?.displayName ?? conversation.title;
+  }
+
+  return (
+    <PageFrame title="Messages" subtitle={isModerator ? "Review site conversations and moderate message activity." : "Chat privately with people you both follow."}>
+      {!user ? <Card className="p-6 text-sm text-textMuted">Sign in to use direct messages.</Card> : (
+      <Card className="flex min-h-[620px] flex-col overflow-hidden p-0">
+          <div className="flex items-center gap-3 overflow-x-auto border-b border-border p-4">
+            {isModerator ? <select value={activeConversationId} onChange={(event) => setActiveConversationId(event.target.value)} className="min-w-56 rounded-xl border border-border bg-surface px-3 py-2 text-sm"><option value="">All chats</option>{conversations.map((item) => <option key={item.id} value={item.id}>{conversationTitle(item)}</option>)}</select> : mutualProfiles.map((contact) => <button key={contact.uid} type="button" disabled={isStartingChat} title={contact.displayName} onClick={() => void beginChat(contact)} className="group shrink-0"><Avatar name={contact.displayName} src={contact.photoURL} className="h-11 w-11 rounded-xl transition group-hover:ring-2 group-hover:ring-[color:var(--accent)]" /></button>)}
+            {!isModerator && !mutualProfiles.length ? <p className="text-sm text-textMuted">Mutually follow someone to start a direct message.</p> : null}
+          </div>
+          <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+            <div className="grid h-9 w-9 place-items-center rounded-xl bg-accent/15 text-accent"><Users size={18} /></div>
+            <div><h2 className="font-semibold">{activeConversation ? conversationTitle(activeConversation) : "Select a conversation"}</h2><p className="text-xs text-textMuted">{isModerator ? "Moderator view" : "Mutual-follow direct message"}</p></div>
           </div>
           <div className="flex-1 space-y-3 overflow-y-auto p-5">
-            {activeMessages.map((message) => {
-              const isOwn = message.senderId === userId;
+            {messages.map((message) => {
+              const isOwn = message.senderId === user.uid;
               return (
                 <div key={message.id} className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[78%] rounded-lg px-4 py-2 text-sm ${isOwn ? "bg-accent text-white" : "bg-surfaceAlt text-text"}`}>
@@ -2136,6 +2292,7 @@ export function ChatPage() {
                 </div>
               );
             })}
+            {!activeConversation ? <p className="text-sm text-textMuted">Choose a conversation or start one with a mutual follow.</p> : null}
           </div>
           <div className="flex gap-2 border-t border-border p-4">
             <input
@@ -2143,19 +2300,20 @@ export function ChatPage() {
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
-                  sendMessage();
+                  void sendMessage();
                 }
               }}
-              placeholder="Message"
+              placeholder={activeConversation ? "Write a message" : "Choose a conversation first"}
+              disabled={!activeConversation || isModerator}
               className="min-w-0 flex-1 rounded-full border border-border bg-transparent px-4 py-2 text-sm outline-none focus:border-accent"
             />
-            <Button type="button" onClick={sendMessage} disabled={!draft.trim()} className="gap-2">
+            <Button type="button" onClick={() => void sendMessage()} disabled={!draft.trim() || !activeConversation || isModerator} className="gap-2">
               <Send size={16} />
               Send
             </Button>
           </div>
-        </Card>
-      </div>
+      </Card>
+      )}
     </PageFrame>
   );
 }
@@ -2418,7 +2576,7 @@ export function ArcadePage() {
     return subscribeToUserProfileById(user.uid, setProfile);
   }, [user]);
 
-  const rewardAmount = getDailyGemReward(profile?.isPremium ?? false);
+  const rewardAmount = getDailyGemReward(profile?.isPremium ?? false, (profile?.dailyStreak ?? 0) + 1);
 
   return (
     <PageFrame title="Arcade" subtitle="Daily rewards and wager games.">
@@ -2439,10 +2597,10 @@ export function ArcadePage() {
                   return;
                 }
 
-                await addGemsToUser(user.uid, rewardAmount);
+                const result = await claimDailyReward();
                 window.localStorage.setItem(rewardKey, new Date().toDateString());
                 setClaimedToday(true);
-                toast.success("Daily gems claimed", { description: `+${rewardAmount} gems added to your account` });
+                toast.success("Daily gems claimed", { description: `+${result.reward} gems added. ${result.streak} day streak.` });
               }}
             >
               {claimedToday ? "Claimed" : `+${rewardAmount} Gems`}
@@ -2451,6 +2609,7 @@ export function ArcadePage() {
         </Card>
         <div className="space-y-5">
           <SlotMachine />
+          <MinesGame />
           <CoinToss />
           <DiceGame />
         </div>
@@ -2596,10 +2755,8 @@ export function MarketPage() {
             </div>
           </Card>
 
-          <div className="space-y-3">
-            <div>
-              <h2 className="text-lg font-semibold">Nameplates</h2>
-            </div>
+          <details open className="space-y-3 rounded-2xl border border-border bg-surfaceAlt/20 p-4">
+            <summary className="flex cursor-pointer list-none items-center justify-between"><h2 className="text-lg font-semibold">Nameplates</h2><ChevronDown size={18} /></summary>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {NAME_COLOR_OPTIONS.map((option) => {
               const owned = (profile.ownedNameColorIds ?? ["default"]).includes(option.id);
@@ -2626,12 +2783,10 @@ export function MarketPage() {
               );
             })}
           </div>
-          </div>
+          </details>
 
-          <div className="space-y-3">
-            <div>
-              <h2 className="text-lg font-semibold">Profile Borders</h2>
-            </div>
+          <details open className="space-y-3 rounded-2xl border border-border bg-surfaceAlt/20 p-4">
+            <summary className="flex cursor-pointer list-none items-center justify-between"><h2 className="text-lg font-semibold">Profile Borders</h2><ChevronDown size={18} /></summary>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {PROFILE_BORDER_OPTIONS.map((option) => {
                 const owned = (profile.ownedProfileBorderIds ?? ["border-none"]).includes(option.id);
@@ -2661,7 +2816,7 @@ export function MarketPage() {
                 );
               })}
             </div>
-          </div>
+          </details>
 
           <div className="space-y-3">
             <div>
@@ -2731,6 +2886,8 @@ const CRYPTO_COINS: Array<{
   { id: "arc", name: "Arc", shortLabel: "ARC", accent: "#f472b6", cardTone: "from-pink-500/20 to-fuchsia-500/10", description: "Fast reaction coin with dramatic sentiment spikes.", icon: Zap },
   { id: "nebula", name: "Nebula Coin", shortLabel: "NEB", accent: "#a78bfa", cardTone: "from-violet-500/20 to-purple-500/10", description: "Cloudy mid-cap asset that drifts before snapping higher or lower.", icon: Sparkles },
   { id: "spark", name: "Spark", shortLabel: "SPK", accent: "#34d399", cardTone: "from-emerald-500/20 to-teal-500/10", description: "Utility-style coin with smaller but frequent moves.", icon: Star },
+  { id: "lumen", name: "Lumen", shortLabel: "LMN", accent: "#facc15", cardTone: "from-yellow-500/20 to-lime-500/10", description: "Light-driven growth token with bright momentum swings.", icon: Sparkles },
+  { id: "titan", name: "Titan", shortLabel: "TTN", accent: "#94a3b8", cardTone: "from-slate-400/20 to-cyan-500/10", description: "High-value infrastructure coin built for slower, heavier moves.", icon: CircleDollarSign },
 ];
 
 export function CryptoPage() {
@@ -2738,12 +2895,13 @@ export function CryptoPage() {
   const [profile, setProfile] = useState<UserProfile | null>(users[0]);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const [market, setMarket] = useState<CryptoMarketState>(() => createInitialCryptoMarketState());
-  const [buyAmounts, setBuyAmounts] = useState<Record<CryptoCoinId, number>>({ wutax: 10, galaxy: 10, arc: 10, nebula: 10, spark: 10 });
-  const [sellAmounts, setSellAmounts] = useState<Record<CryptoCoinId, number>>({ wutax: 0, galaxy: 0, arc: 0, nebula: 0, spark: 0 });
+  const [buyAmounts, setBuyAmounts] = useState<Record<CryptoCoinId, number>>({ wutax: 10, galaxy: 10, arc: 10, nebula: 10, spark: 10, lumen: 10, titan: 10 });
+  const [sellAmounts, setSellAmounts] = useState<Record<CryptoCoinId, number>>({ wutax: 0, galaxy: 0, arc: 0, nebula: 0, spark: 0, lumen: 0, titan: 0 });
   const [isModeratorPanelOpen, setIsModeratorPanelOpen] = useState(false);
   const [isModeratorResetsOpen, setIsModeratorResetsOpen] = useState(false);
+  const [purchasedCoinId, setPurchasedCoinId] = useState<CryptoCoinId | null>(null);
   const gems = profile?.gems ?? 0;
-  const holdings = profile?.coinHoldings ?? { wutax: 0, galaxy: 0, arc: 0, nebula: 0, spark: 0 };
+  const holdings = profile?.coinHoldings ?? { wutax: 0, galaxy: 0, arc: 0, nebula: 0, spark: 0, lumen: 0, titan: 0 };
   const isModerator = profile?.isModerator ?? false;
 
   useEffect(() => {
@@ -2768,6 +2926,8 @@ export function CryptoPage() {
     try {
       const roundedGemAmount = Number(gemAmount.toFixed(2));
       const result = await executeCoinPurchase(user.uid, coinId, roundedGemAmount);
+      setPurchasedCoinId(coinId);
+      window.setTimeout(() => setPurchasedCoinId((current) => current === coinId ? null : current), 800);
       toast.success("Investment confirmed", {
         description: `-${roundedGemAmount.toFixed(2)} gems invested for ${result.coinAmount.toFixed(2)} ${CRYPTO_COINS.find((coin) => coin.id === coinId)?.shortLabel}`,
       });
@@ -2918,7 +3078,7 @@ export function CryptoPage() {
             const chartStroke = chartDelta >= 0 ? "#4ade80" : "#f87171";
 
             return (
-              <Card key={coin.id} className="space-y-4 border border-border bg-surface p-5">
+              <Card key={coin.id} className={`space-y-4 border border-border bg-surface p-5 ${purchasedCoinId === coin.id ? "crypto-purchase-flash" : ""}`}>
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
                     <p className="inline-flex items-center gap-2 text-sm font-semibold" style={{ color: coin.accent }}><coin.icon size={16} />{coin.name}</p>

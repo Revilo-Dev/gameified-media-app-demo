@@ -157,7 +157,13 @@ export const banUserAccount = onCall(async (request) => {
     await batch.commit();
   }
 
-  await auth.deleteUser(targetUserId);
+  try {
+    await auth.deleteUser(targetUserId);
+  } catch (error) {
+    if ((error as { code?: string }).code !== "auth/user-not-found") {
+      throw error;
+    }
+  }
 
   return { ok: true };
 });
@@ -232,6 +238,8 @@ export const resetAllCrypto = onCall(async (request) => {
         arc: 0,
         nebula: 0,
         spark: 0,
+        lumen: 0,
+        titan: 0,
       },
       coinInvestmentTotals: {
         wutax: 0,
@@ -239,6 +247,8 @@ export const resetAllCrypto = onCall(async (request) => {
         arc: 0,
         nebula: 0,
         spark: 0,
+        lumen: 0,
+        titan: 0,
       },
       updatedAt: FieldValue.serverTimestamp(),
     });
@@ -252,9 +262,48 @@ export const resetAllCrypto = onCall(async (request) => {
       arc: { currentValue: 0.84, history: [0.69, 0.71, 0.74, 0.72, 0.76, 0.78, 0.8, 0.77, 0.81, 0.83, 0.79, 0.82, 0.85, 0.81, 0.8, 0.78, 0.82, 0.84] },
       nebula: { currentValue: 1.64, history: [1.28, 1.31, 1.35, 1.39, 1.42, 1.45, 1.49, 1.52, 1.56, 1.54, 1.58, 1.61, 1.59, 1.57, 1.6, 1.62, 1.63, 1.64] },
       spark: { currentValue: 0.52, history: [0.36, 0.38, 0.4, 0.41, 0.43, 0.44, 0.46, 0.45, 0.47, 0.48, 0.49, 0.47, 0.48, 0.5, 0.49, 0.51, 0.5, 0.52] },
+      lumen: { currentValue: 3.14, history: [2.72, 2.8, 2.88, 2.81, 2.94, 3.02, 3.09, 3.01, 3.16, 3.24, 3.19, 3.28, 3.22, 3.31, 3.18, 3.26, 3.2, 3.14] },
+      titan: { currentValue: 6.48, history: [5.7, 5.82, 5.96, 6.1, 6.02, 6.18, 6.26, 6.14, 6.32, 6.4, 6.51, 6.43, 6.58, 6.7, 6.62, 6.55, 6.59, 6.48] },
     },
     updatedAt: FieldValue.serverTimestamp(),
   }, { merge: true });
 
   return { ok: true };
+});
+
+export const claimDailyReward = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const userRef = db.collection("users").doc(request.auth.uid);
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  let reward = 0;
+  let streak = 0;
+
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(userRef);
+    if (!snapshot.exists) {
+      throw new HttpsError("not-found", "Your profile is missing.");
+    }
+
+    if (snapshot.get("dailyClaimDate") === today) {
+      throw new HttpsError("already-exists", "Today's reward has already been claimed.");
+    }
+
+    streak = snapshot.get("dailyClaimDate") === yesterday ? Number(snapshot.get("dailyStreak") ?? 0) + 1 : 1;
+    const baseReward = 100 + (streak - 1) * 25;
+    reward = baseReward * (snapshot.get("isPremium") === true ? 2 : 1);
+    const gems = Number(snapshot.get("gems") ?? 0);
+
+    transaction.update(userRef, {
+      gems: Number((gems + reward).toFixed(2)),
+      dailyClaimDate: today,
+      dailyStreak: streak,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  return { reward, streak };
 });

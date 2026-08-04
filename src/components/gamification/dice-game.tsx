@@ -16,7 +16,7 @@ export function DiceGame() {
   const [rolledSide, setRolledSide] = useState<number>(1);
   const [isRolling, setIsRolling] = useState(false);
   const gems = profile?.gems ?? 0;
-  const wager = Math.max(1, Math.floor(Number(wagerInput) || 10));
+  const wager = Math.max(10, Math.floor(Number(wagerInput) || 10));
 
   useEffect(() => {
     if (!user) {

@@ -70,7 +70,7 @@ export function InlineEntities({
   const parts = text.split(ENTITY_PATTERN);
 
   return (
-    <span className={cn("whitespace-pre-wrap", className)}>
+    <span className={cn("whitespace-pre-wrap break-words [overflow-wrap:anywhere]", className)}>
       {parts.map((part, index) => {
         if (!part) {
           return null;

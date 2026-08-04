@@ -9,6 +9,7 @@ export const functionNames = {
   deletePostCascade: "deletePostCascade",
   resetAllGems: "resetAllGems",
   resetAllCrypto: "resetAllCrypto",
+  claimDailyReward: "claimDailyReward",
 } as const;
 
 export async function banUserAccount(targetUserId: string) {
@@ -31,6 +32,12 @@ export async function resetAllGems() {
 
 export async function resetAllCrypto() {
   const callable = httpsCallable<undefined, { ok: boolean }>(functions, functionNames.resetAllCrypto);
+  const result = await callable();
+  return result.data;
+}
+
+export async function claimDailyReward() {
+  const callable = httpsCallable<undefined, { reward: number; streak: number }>(functions, functionNames.claimDailyReward);
   const result = await callable();
   return result.data;
 }

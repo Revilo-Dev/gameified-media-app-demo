@@ -33,7 +33,7 @@ import { COLLECTIONS } from "@/firebase/firestore";
 import { subscribeToFollowCounts } from "@/firebase/follows";
 import { createNotification, subscribeToNotifications } from "@/firebase/notifications";
 import { subscribeToLeaderboardRank } from "@/firebase/posts";
-import { resetAllCrypto, resetAllGems } from "@/firebase/functions";
+import { claimDailyReward, resetAllCrypto, resetAllGems } from "@/firebase/functions";
 import { addGemsToUser, addXpToUser } from "@/firebase/users";
 import { getNameColorStyle } from "@/constants/name-colors";
 import { users } from "@/lib/demo-data";
@@ -67,11 +67,11 @@ const mobileSecondaryNavItems = [
   { to: "/premium", label: "Premium", icon: Crown },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
-const BASE_DAILY_GEM_REWARD = 25;
+const BASE_DAILY_GEM_REWARD = 100;
 const PREMIUM_DAILY_GEM_MULTIPLIER = 2;
 
-function getDailyGemReward(isPremium: boolean) {
-  return BASE_DAILY_GEM_REWARD * (isPremium ? PREMIUM_DAILY_GEM_MULTIPLIER : 1);
+function getDailyGemReward(isPremium: boolean, streak = 1) {
+  return (BASE_DAILY_GEM_REWARD + Math.max(0, streak - 1) * 25) * (isPremium ? PREMIUM_DAILY_GEM_MULTIPLIER : 1);
 }
 
 export function AppLayout() {
@@ -96,7 +96,7 @@ export function AppLayout() {
   const rewardKey = "pulsearc-daily-gems";
   const profileCacheKey = user ? `cache:sidebar-profile:${user.uid}` : null;
   const followCacheKey = user ? `cache:sidebar-follows:${user.uid}` : null;
-  const dailyGemReward = getDailyGemReward(profile.isPremium);
+  const dailyGemReward = getDailyGemReward(profile.isPremium, (profile.dailyStreak ?? 0) + 1);
 
   useEffect(() => {
     if (!profileCacheKey || !followCacheKey) {
@@ -226,7 +226,7 @@ export function AppLayout() {
 
     const tick = (now: number) => {
       const progress = Math.min(1, (now - startedAt) / duration);
-      const nextValue = Math.round(previousGems + delta * progress);
+      const nextValue = Number((previousGems + delta * progress).toFixed(1));
       setDisplayedGems(nextValue);
 
       if (progress < 1) {
@@ -285,7 +285,7 @@ export function AppLayout() {
                   <span className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
                     gemDelta > 0 ? "bg-emerald-500/15 text-emerald-300" : "bg-[color:var(--error)]/15 text-[color:var(--error)]"
                   }`}>
-                    {gemDelta > 0 ? `+${gemDelta}` : gemDelta}
+                    {gemDelta > 0 ? `+${gemDelta.toFixed(1)}` : gemDelta.toFixed(1)}
                   </span>
                 ) : null}
               </div>
@@ -295,9 +295,10 @@ export function AppLayout() {
               disabled={claimedToday}
               className="w-full"
               onClick={async () => {
-                await addGemsToUser(user.uid, dailyGemReward);
+                const result = await claimDailyReward();
                 window.localStorage.setItem(rewardKey, new Date().toDateString());
                 setClaimedToday(true);
+                toast.success("Daily gems claimed", { description: `+${result.reward} gems. ${result.streak} day streak.` });
               }}
             >
               <Gem size={16} />

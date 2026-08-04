@@ -7,6 +7,7 @@ import {
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
+  sendEmailVerification,
   updatePassword,
   updateProfile,
 } from "firebase/auth";
@@ -21,12 +22,23 @@ export async function signInWithGoogle() {
 }
 
 export async function signInWithEmail(email: string, password: string) {
-  return signInWithEmailAndPassword(auth, email, password);
+  const credential = await signInWithEmailAndPassword(auth, email, password);
+  await credential.user.reload();
+
+  if (!auth.currentUser?.emailVerified) {
+    await sendEmailVerification(credential.user);
+    await signOut(auth);
+    throw new Error("Verify your email address before signing in. A new verification email has been sent.");
+  }
+
+  return credential;
 }
 
 export async function signUpWithEmail(email: string, password: string, displayName: string) {
   const credential = await createUserWithEmailAndPassword(auth, email, password);
   await updateProfile(credential.user, { displayName });
+  await sendEmailVerification(credential.user);
+  await signOut(auth);
   return credential;
 }
 

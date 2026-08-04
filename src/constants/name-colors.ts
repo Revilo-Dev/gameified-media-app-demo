@@ -141,6 +141,8 @@ export const NAME_COLOR_OPTIONS: NameColorOption[] = [
     description: "Fast cool-spectrum wave that keeps motion readable.",
     animated: true,
   },
+  { id: "ionStorm", name: "Ion Storm", color: "#a5f3fc", gradient: "linear-gradient(90deg, #a5f3fc, #818cf8, #f0abfc, #a5f3fc)", price: 4200, rarity: "legendary", description: "Charged ice-blue and violet current with a fast animated sweep.", animated: true },
+  { id: "copperGlow", name: "Copper Glow", color: "#fdba74", gradient: "linear-gradient(90deg, #fdba74, #fb7185, #fef3c7, #fdba74)", price: 4350, rarity: "legendary", description: "Polished copper shimmer with a warm, high-contrast finish.", animated: true },
 ];
 
 export function getNameColorValue(equippedNameColorId: string | null | undefined) {

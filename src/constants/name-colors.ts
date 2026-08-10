@@ -143,7 +143,12 @@ export const NAME_COLOR_OPTIONS: NameColorOption[] = [
   },
   { id: "ionStorm", name: "Ion Storm", color: "#a5f3fc", gradient: "linear-gradient(90deg, #a5f3fc, #818cf8, #f0abfc, #a5f3fc)", price: 4200, rarity: "legendary", description: "Charged ice-blue and violet current with a fast animated sweep.", animated: true },
   { id: "copperGlow", name: "Copper Glow", color: "#fdba74", gradient: "linear-gradient(90deg, #fdba74, #fb7185, #fef3c7, #fdba74)", price: 4350, rarity: "legendary", description: "Polished copper shimmer with a warm, high-contrast finish.", animated: true },
-];
+  { id: "lumenPulse", name: "Lumen Pulse", color: "#fef08a", gradient: "linear-gradient(90deg,#fef08a,#facc15,#fef08a)", price: 0, rarity: "legendary", description: "A rhythmic golden pulse with a soft halo.", animated: true, effect: "pulse" },
+  { id: "neonBloom", name: "Neon Bloom", color: "#67e8f9", gradient: "linear-gradient(90deg,#67e8f9,#c4b5fd,#67e8f9)", price: 0, rarity: "legendary", description: "A glowing cyan-violet nameplate bloom.", animated: true, effect: "glow" },
+  { id: "emberFlicker", name: "Ember Flicker", color: "#fb923c", gradient: "linear-gradient(90deg,#fb923c,#fb7185,#fbbf24)", price: 0, rarity: "legendary", description: "Warm animated embers with a subtle flicker.", animated: true, effect: "flicker" },
+  { id: "violetBeacon", name: "Violet Beacon", color: "#c4b5fd", gradient: "linear-gradient(90deg,#c4b5fd,#e879f9,#c4b5fd)", price: 0, rarity: "legendary", description: "A violet beacon that pulses into view.", animated: true, effect: "pulse" },
+  { id: "tidalGlow", name: "Tidal Glow", color: "#5eead4", gradient: "linear-gradient(90deg,#5eead4,#38bdf8,#5eead4)", price: 0, rarity: "legendary", description: "A bright tidal glow with a smooth moving shimmer.", animated: true, effect: "glow" },
+].map((option, index) => index === 0 ? option : { ...option, price: 1000 + (index - 1) * 500 }) as NameColorOption[];
 
 export function getNameColorValue(equippedNameColorId: string | null | undefined) {
   return NAME_COLOR_OPTIONS.find((option) => option.id === equippedNameColorId)?.color ?? "var(--text)";
@@ -161,6 +166,6 @@ export function getNameColorStyle(equippedNameColorId: string | null | undefined
     backgroundSize: "200% 200%",
     backgroundClip: "text",
     WebkitBackgroundClip: "text",
-    animation: "nameplate-gradient-shift 5s linear infinite",
+    animation: option.effect === "glow" ? "nameplate-glow 2.4s ease-in-out infinite" : option.effect === "pulse" ? "nameplate-pulse 1.8s ease-in-out infinite" : option.effect === "flicker" ? "nameplate-flicker 2.2s ease-in-out infinite" : "nameplate-gradient-shift 5s linear infinite",
   };
 }

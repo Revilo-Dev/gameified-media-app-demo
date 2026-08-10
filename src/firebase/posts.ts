@@ -65,6 +65,7 @@ function normalizePost(document: { id: string; data: () => Record<string, unknow
     replyCount: Number(data.replyCount ?? 0),
     repostCount: Number(data.repostCount ?? 0),
     bookmarkCount: Number(data.bookmarkCount ?? 0),
+    viewCount: Number(data.viewCount ?? 0),
     averageRating: Number(data.averageRating ?? 0),
     starRatingCount: Number(data.starRatingCount ?? 0),
     rottenTomatoCount: Number(data.rottenTomatoCount ?? 0),
@@ -104,7 +105,7 @@ export function subscribeToPosts(onChange: (posts: Post[]) => void): Unsubscribe
 }
 
 export function subscribeToPostsByAuthor(authorId: string, onChange: (posts: Post[]) => void): Unsubscribe {
-  const postsQuery = query(collection(db, COLLECTIONS.posts), where("authorId", "==", authorId), orderBy("createdAt", "desc"));
+  const postsQuery = query(collection(db, COLLECTIONS.posts), where("authorId", "==", authorId), orderBy("createdAt", "desc"), limit(12));
 
   return onSnapshot(postsQuery, (snapshot) => {
     onChange(snapshot.docs.map(normalizePost).filter((post) => !post.isDeleted));
@@ -113,12 +114,13 @@ export function subscribeToPostsByAuthor(authorId: string, onChange: (posts: Pos
 
 type CreatePostInput = Omit<
   Post,
-  "id" | "reactionCount" | "replyCount" | "repostCount" | "bookmarkCount" | "createdAt" | "averageRating" | "starRatingCount" | "rottenTomatoCount"
+  "id" | "reactionCount" | "replyCount" | "repostCount" | "bookmarkCount" | "viewCount" | "createdAt" | "averageRating" | "starRatingCount" | "rottenTomatoCount"
 > & {
   reactionCount?: number;
   replyCount?: number;
   repostCount?: number;
   bookmarkCount?: number;
+  viewCount?: number;
   averageRating?: number;
   starRatingCount?: number;
   rottenTomatoCount?: number;
@@ -141,6 +143,7 @@ export async function createPost(input: CreatePostInput) {
     replyCount: input.replyCount ?? 0,
     repostCount: input.repostCount ?? 0,
     bookmarkCount: input.bookmarkCount ?? 0,
+    viewCount: input.viewCount ?? 0,
     averageRating: input.averageRating ?? 0,
     starRatingCount: input.starRatingCount ?? 0,
     rottenTomatoCount: input.rottenTomatoCount ?? 0,

@@ -51,7 +51,7 @@ export function DiceGame() {
       const payout = wager * 4;
       await addGemsToUser(user.uid, payout);
       await addGamblingResult(user.uid, "gain", payout);
-      await addXpToUser(user.uid, Math.max(8, Math.floor(payout / 4)));
+      await addXpToUser(user.uid, Math.max(1, Math.floor(payout / 40)));
     }
 
     setIsRolling(false);

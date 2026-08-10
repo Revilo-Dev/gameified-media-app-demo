@@ -59,7 +59,7 @@ export function CoinToss() {
       const payout = Math.floor(wager * 1.5);
       await addGemsToUser(user.uid, payout);
       await addGamblingResult(user.uid, "gain", payout);
-      await addXpToUser(user.uid, Math.max(5, Math.floor(payout / 3)));
+      await addXpToUser(user.uid, Math.max(1, Math.floor(payout / 30)));
     }
 
     setIsFlipping(false);

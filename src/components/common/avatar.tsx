@@ -6,10 +6,15 @@ interface AvatarProps {
   src?: string | null;
   className?: string;
   borderId?: string | null;
+  disableBorder?: boolean;
+  disableBorderAnimation?: boolean;
 }
 
-export function Avatar({ name, src, className, borderId }: AvatarProps) {
-  const borderOptionStyle = borderId ? getProfileBorderStyle(borderId) : null;
+export function Avatar({ name, src, className, borderId, disableBorder = false, disableBorderAnimation = false }: AvatarProps) {
+  const rawBorderStyle = !disableBorder && borderId ? getProfileBorderStyle(borderId) : null;
+  const borderOptionStyle = rawBorderStyle && disableBorderAnimation
+    ? { ...rawBorderStyle, animation: undefined, transform: undefined, filter: undefined, boxShadow: undefined }
+    : rawBorderStyle;
 
   if (borderOptionStyle) {
     return (

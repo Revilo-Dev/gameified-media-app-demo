@@ -111,7 +111,7 @@ export function SlotMachine() {
       const payout = Math.floor(wager * win.multiplier);
       await addGemsToUser(user.uid, payout);
       await addGamblingResult(user.uid, "gain", payout);
-      await addXpToUser(user.uid, Math.max(10, Math.floor(payout / 4)));
+      await addXpToUser(user.uid, Math.max(2, Math.floor(payout / 40)));
       setLastResult({ payout, multiplier: win.multiplier, label: win.label });
     }
 

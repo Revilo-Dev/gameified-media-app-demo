@@ -11,4 +11,6 @@ export const COLLECTIONS = {
   badges: "badges",
   userBadges: "userBadges",
   xpTransactions: "xpTransactions",
+  activityHistory: "activityHistory",
+  postViews: "postViews",
 } as const;

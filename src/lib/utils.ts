@@ -6,5 +6,10 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatAmount(value: number, digits = 2) {
-  return Number(value ?? 0).toFixed(digits);
+  const numericValue = Number(value ?? 0);
+  if (!Number.isFinite(numericValue)) return "0";
+  if (Math.abs(numericValue) >= 1_000_000) {
+    return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: digits }).format(numericValue);
+  }
+  return numericValue.toLocaleString("en", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }

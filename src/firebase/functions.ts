@@ -10,6 +10,7 @@ export const functionNames = {
   resetAllGems: "resetAllGems",
   resetAllCrypto: "resetAllCrypto",
   claimDailyReward: "claimDailyReward",
+  recordPostView: "recordPostView",
 } as const;
 
 export async function banUserAccount(targetUserId: string) {
@@ -40,4 +41,9 @@ export async function claimDailyReward() {
   const callable = httpsCallable<undefined, { reward: number; streak: number }>(functions, functionNames.claimDailyReward);
   const result = await callable();
   return result.data;
+}
+
+export async function recordPostView(postId: string) {
+  const callable = httpsCallable<{ postId: string }, { counted: boolean }>(functions, functionNames.recordPostView);
+  return (await callable({ postId })).data;
 }

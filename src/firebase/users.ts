@@ -5,7 +5,7 @@ import { createInitialCryptoMarketState, getExecutedBuyCoinAmount, getExecutedSe
 import { COLLECTIONS } from "@/firebase/firestore";
 import { createNotification } from "@/firebase/notifications";
 import { getLevelForXp } from "@/constants/gamification";
-import type { CryptoCoinId, ThemeMode, UserProfile } from "@/types/models";
+import type { ActivityHistoryEntry, CryptoCoinId, ThemeMode, UserProfile } from "@/types/models";
 import { users as demoUsers } from "@/lib/demo-data";
 import { bannerPresets } from "@/lib/banner-presets";
 import { readCache, writeCache } from "@/lib/persistent-cache";
@@ -103,16 +103,23 @@ export async function ensureUserProfile(user: User) {
     equippedNameColorId: "default",
     ownedProfileBorderIds: ["border-none"],
     equippedProfileBorderId: "border-none",
+    ownedProfileCardIds: ["card-default"],
+    equippedProfileCardId: "card-default",
+    displayPreferences: { disableProfileBorders: false, disableNameEffects: false },
     followerCount: 0,
     followingCount: 0,
     postCount: 0,
     rottenTomatoCount: 0,
     badgeCount: 0,
+    totalPostViews: 0,
     joinedAt: new Date().toISOString(),
     lastOnlineAt: new Date().toISOString(),
     timeoutUntil: null,
     dailyClaimDate: null,
+    dailyClaimAt: null,
     dailyStreak: 0,
+    dailyWheelSpinDate: null,
+    dailyWheelSpinsUsed: 0,
     notificationPreferences: { replies: true, mentions: true, follows: true, reactions: true, rewards: true, reports: true },
   };
 
@@ -203,7 +210,7 @@ export async function addGemsToUser(userId: string, gemDelta: number) {
   });
 }
 
-export async function addGamblingResult(userId: string, type: "gain" | "loss", amount: number) {
+export async function addGamblingResult(userId: string, type: "gain" | "loss", amount: number, title = "Arcade game") {
   const ref = doc(db, COLLECTIONS.users, userId);
 
   await runTransaction(db, async (transaction) => {
@@ -219,6 +226,23 @@ export async function addGamblingResult(userId: string, type: "gain" | "loss", a
       gamblingLosses: Number(snapshot.data().gamblingLosses ?? 0) + (type === "loss" ? safeAmount : 0),
       updatedAt: serverTimestamp(),
     });
+  });
+
+  await recordActivity(userId, "gamble", title, `${type === "gain" ? "Won" : "Wagered"} ${formatHistoryAmount(amount)} gems`, amount);
+}
+
+function formatHistoryAmount(amount: number) {
+  return Number(Math.max(0, amount).toFixed(2)).toLocaleString();
+}
+
+export async function recordActivity(userId: string, category: ActivityHistoryEntry["category"], title: string, detail: string, amount?: number) {
+  const entryRef = doc(collection(db, COLLECTIONS.activityHistory));
+  await setDoc(entryRef, { userId, category, title, detail, amount: amount ?? null, createdAt: new Date().toISOString() });
+}
+
+export function subscribeToActivityHistory(onChange: (entries: ActivityHistoryEntry[]) => void): Unsubscribe {
+  return onSnapshot(query(collection(db, COLLECTIONS.activityHistory), orderBy("createdAt", "desc"), limit(60)), (snapshot) => {
+    onChange(snapshot.docs.map((entry) => ({ ...(entry.data() as Omit<ActivityHistoryEntry, "id">), id: entry.id })));
   });
 }
 
@@ -243,6 +267,7 @@ export async function buyCasinoCoin(userId: string) {
       updatedAt: serverTimestamp(),
     });
   });
+  await recordActivity(userId, "purchase", "Casino coin", "Purchased 1 casino coin for 5 gems", 5);
 }
 
 export async function investGemsInCoin(userId: string, coinId: CryptoCoinId, gemCost: number, coinAmount: number) {
@@ -377,6 +402,7 @@ export async function executeCoinPurchase(userId: string, coinId: CryptoCoinId, 
     }, { merge: true });
   });
 
+  await recordActivity(userId, "trade", `Bought ${coinId.toUpperCase()}`, `${formatHistoryAmount(gemCost)} gems for ${formatHistoryAmount(coinAmount)} coins`, gemCost);
   return { coinAmount };
 }
 
@@ -440,6 +466,7 @@ export async function executeCoinSale(userId: string, coinId: CryptoCoinId, coin
     }, { merge: true });
   });
 
+  await recordActivity(userId, "trade", `Sold ${coinId.toUpperCase()}`, `${formatHistoryAmount(coinAmount)} coins for ${formatHistoryAmount(gemValue)} gems`, gemValue);
   return { profit, gemValue };
 }
 
@@ -535,7 +562,11 @@ export function subscribeToUserProfileById(userId: string, onChange: (profile: U
 }
 
 export function subscribeToUserProfileByHandle(handle: string, onChange: (profile: UserProfile | null) => void): Unsubscribe {
-  const profileQuery = query(collection(db, COLLECTIONS.users), where("handle", "==", handle), limit(1));
+  const normalizedHandle = handle.trim().toLowerCase();
+  const cacheKey = `cache:user-handle:${normalizedHandle}`;
+  const cachedProfile = readCache<UserProfile>(cacheKey);
+  if (cachedProfile) onChange(cachedProfile);
+  const profileQuery = query(collection(db, COLLECTIONS.users), where("handle", "==", normalizedHandle), limit(1));
 
   return onSnapshot(profileQuery, (snapshot) => {
     if (snapshot.empty) {
@@ -545,7 +576,10 @@ export function subscribeToUserProfileByHandle(handle: string, onChange: (profil
     }
 
     const document = snapshot.docs[0];
-    onChange({ ...(document.data() as UserProfile), uid: document.id });
+    const profile = { ...(document.data() as UserProfile), uid: document.id };
+    writeCache(cacheKey, profile);
+    writeCache(`cache:user:${document.id}`, profile);
+    onChange(profile);
   });
 }
 

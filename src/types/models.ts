@@ -18,7 +18,12 @@ export type ThemeMode =
   | "monochrome"
   | "orchard"
   | "ultraviolet"
-  | "copperline";
+  | "copperline"
+  | "neonHarbor"
+  | "velvetOrbit"
+  | "moonlitInk"
+  | "jadeCircuit"
+  | "apricotGlow";
 
 export type BadgeRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
 export type CryptoCoinId = "wutax" | "galaxy" | "arc" | "nebula" | "spark" | "lumen" | "titan";
@@ -69,16 +74,26 @@ export interface UserProfile {
   equippedNameColorId: string | null;
   ownedProfileBorderIds: string[];
   equippedProfileBorderId: string | null;
+  ownedProfileCardIds?: string[];
+  equippedProfileCardId?: string | null;
+  displayPreferences?: {
+    disableProfileBorders: boolean;
+    disableNameEffects: boolean;
+  };
   followerCount: number;
   followingCount: number;
   postCount: number;
   rottenTomatoCount: number;
   badgeCount: number;
+  totalPostViews?: number;
   joinedAt: string;
   lastOnlineAt?: string;
   timeoutUntil?: string | null;
   dailyClaimDate?: string | null;
+  dailyClaimAt?: number | null;
   dailyStreak?: number;
+  dailyWheelSpinDate?: string | null;
+  dailyWheelSpinsUsed?: number;
   notificationPreferences?: Record<"replies" | "mentions" | "follows" | "reactions" | "rewards" | "reports", boolean>;
 }
 
@@ -100,6 +115,7 @@ export interface Post {
   replyCount: number;
   repostCount: number;
   bookmarkCount: number;
+  viewCount?: number;
   reactionTypeCounts?: Record<string, number>;
   averageRating: number;
   starRatingCount: number;
@@ -138,6 +154,16 @@ export interface Conversation {
   lastSenderId?: string | null;
 }
 
+export interface ActivityHistoryEntry {
+  id: string;
+  userId: string;
+  category: "trade" | "gamble" | "purchase";
+  title: string;
+  detail: string;
+  amount?: number;
+  createdAt: string;
+}
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -165,6 +191,7 @@ export interface NameColorOption {
   description: string;
   animated?: boolean;
   gradient?: string;
+  effect?: "glow" | "pulse" | "flicker";
 }
 
 export interface ProfileBorderOption {
@@ -175,6 +202,17 @@ export interface ProfileBorderOption {
   description: string;
   preview: string;
   animated?: boolean;
+  effect?: "glow" | "pulse" | "spin";
+}
+
+export interface ProfileCardOption {
+  id: string;
+  name: string;
+  price: number;
+  rarity: BadgeRarity;
+  description: string;
+  background: string;
+  accent: string;
 }
 
 export interface TriviaQuestion {

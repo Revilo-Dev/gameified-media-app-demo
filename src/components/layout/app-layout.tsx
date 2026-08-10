@@ -34,12 +34,13 @@ import { subscribeToFollowCounts } from "@/firebase/follows";
 import { createNotification, subscribeToNotifications } from "@/firebase/notifications";
 import { subscribeToLeaderboardRank } from "@/firebase/posts";
 import { claimDailyReward, resetAllCrypto, resetAllGems } from "@/firebase/functions";
-import { addGemsToUser, addXpToUser } from "@/firebase/users";
+import { addGemsToUser, addXpToUser, subscribeToActivityHistory, updateUserProfile } from "@/firebase/users";
 import { getNameColorStyle } from "@/constants/name-colors";
 import { users } from "@/lib/demo-data";
 import { readCache, writeCache } from "@/lib/persistent-cache";
 import { useUiStore } from "@/store/use-ui-store";
-import type { UserProfile } from "@/types/models";
+import { sendBrowserAlert } from "@/lib/browser-alerts";
+import type { ActivityHistoryEntry, UserProfile } from "@/types/models";
 
 const navItems = [
   { to: "/", label: "Home", icon: Home },
@@ -89,11 +90,15 @@ export function AppLayout() {
   const [displayedGems, setDisplayedGems] = useState(users[0].gems);
   const [gemDelta, setGemDelta] = useState(0);
   const [gemFlash, setGemFlash] = useState<"gain" | "spend" | null>(null);
+  const [activityHistory, setActivityHistory] = useState<ActivityHistoryEntry[]>([]);
+  const [isSidebarGemsEditing, setIsSidebarGemsEditing] = useState(false);
+  const [sidebarGemValue, setSidebarGemValue] = useState("");
   const previousRankRef = useRef<number | null>(null);
   const seenNotificationIdsRef = useRef<string[] | null>(null);
   const previousGemsRef = useRef<number | null>(null);
   const profilePath = `/profile/${profile.handle}`;
   const rewardKey = "pulsearc-daily-gems";
+  const rewardCooldownMs = 12 * 60 * 60 * 1000;
   const profileCacheKey = user ? `cache:sidebar-profile:${user.uid}` : null;
   const followCacheKey = user ? `cache:sidebar-follows:${user.uid}` : null;
   const dailyGemReward = getDailyGemReward(profile.isPremium, (profile.dailyStreak ?? 0) + 1);
@@ -143,8 +148,14 @@ export function AppLayout() {
   }, [profile.followerCount, profile.followingCount, user]);
 
   useEffect(() => {
-    setClaimedToday(window.localStorage.getItem(rewardKey) === new Date().toDateString());
+    setClaimedToday(Date.now() - Number(window.localStorage.getItem(rewardKey) ?? 0) < rewardCooldownMs);
   }, []);
+
+  useEffect(() => {
+    if (profile.dailyClaimAt) {
+      setClaimedToday(Date.now() - profile.dailyClaimAt < rewardCooldownMs);
+    }
+  }, [profile.dailyClaimAt, rewardCooldownMs]);
 
   useEffect(() => {
     if (!user) {
@@ -162,6 +173,7 @@ export function AppLayout() {
         const newestNotification = notifications.find((item) => !previousIds.includes(item.id));
         if (newestNotification) {
           toast(newestNotification.title, { description: newestNotification.body });
+          sendBrowserAlert(newestNotification.title, newestNotification.body);
         }
       }
       seenNotificationIdsRef.current = nextIds;
@@ -244,6 +256,8 @@ export function AppLayout() {
     };
   }, [profile.gems]);
 
+  useEffect(() => subscribeToActivityHistory(setActivityHistory), []);
+
   if (!user) {
     return (
       <div className="mx-auto grid min-h-screen max-w-lg place-items-center px-4">
@@ -273,10 +287,10 @@ export function AppLayout() {
               <span>Followers <span className="font-semibold text-text">{followCounts.followers}</span></span>
             </div>
             <XpProgress xp={profile.xp} level={profile.level} />
-            <div className={`rounded-2xl border border-border bg-surface px-4 py-3 transition-all duration-500 ${
+            <div onClick={() => { if (profile.isModerator) { setSidebarGemValue(String(profile.gems)); setIsSidebarGemsEditing(true); } }} className={`rounded-2xl border border-border bg-surface px-4 py-3 transition-all duration-500 ${profile.isModerator ? "cursor-pointer hover:border-[color:var(--accent)]" : ""} ${
               gemFlash === "gain" ? "gem-flash-gain" : gemFlash === "spend" ? "gem-flash-spend" : ""
             }`}>
-              <div className="flex items-start justify-between gap-3">
+              {isSidebarGemsEditing ? <form onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); const nextValue = Number(sidebarGemValue); if (!Number.isFinite(nextValue) || nextValue < 0) { toast.error("Gems must be a non-negative number."); return; } void updateUserProfile(profile.uid, { gems: nextValue }).then(() => { setIsSidebarGemsEditing(false); toast.success("Gems updated"); }).catch((error) => toast.error(error instanceof Error ? error.message : "Unable to update gems")); }} className="flex items-center gap-2"><input autoFocus inputMode="decimal" value={sidebarGemValue} onChange={(event) => setSidebarGemValue(event.target.value)} className="min-w-0 flex-1 bg-transparent text-xl font-bold tabular-nums outline-none" /><Button type="submit" size="sm">Save</Button><Button type="button" variant="ghost" size="sm" onClick={() => setIsSidebarGemsEditing(false)}>Cancel</Button></form> : <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-textMuted">Gems</p>
                   <p className="mt-1 text-xl font-bold tabular-nums">{displayedGems}</p>
@@ -288,21 +302,21 @@ export function AppLayout() {
                     {gemDelta > 0 ? `+${gemDelta.toFixed(1)}` : gemDelta.toFixed(1)}
                   </span>
                 ) : null}
-              </div>
+              </div>}
             </div>
             <Button
               variant={claimedToday ? "secondary" : "primary"}
               disabled={claimedToday}
-              className="w-full"
+              className={`w-full ${claimedToday ? "bg-surfaceAlt text-textMuted" : ""}`}
               onClick={async () => {
                 const result = await claimDailyReward();
-                window.localStorage.setItem(rewardKey, new Date().toDateString());
+                window.localStorage.setItem(rewardKey, String(Date.now()));
                 setClaimedToday(true);
                 toast.success("Daily gems claimed", { description: `+${result.reward} gems. ${result.streak} day streak.` });
               }}
             >
               <Gem size={16} />
-              {claimedToday ? "Daily gems claimed" : `Redeem +${dailyGemReward} gems`}
+              {claimedToday ? "Reward claimed — back in 12h" : `Redeem +${dailyGemReward} gems`}
             </Button>
             <NavLink to="/premium" className="flex items-center gap-2 rounded-full bg-[color:var(--accent)] px-4 py-2 text-sm font-semibold text-white shadow-panel">
               <Crown size={16} /> Go Premium
@@ -412,6 +426,18 @@ export function AppLayout() {
               </NavLink>
             ))}
           </Card>
+          <details open className="mt-4 rounded-2xl border border-border bg-surfaceAlt/30 p-3">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold">Activity history <ChevronDown size={16} /></summary>
+            <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+              {activityHistory.length ? activityHistory.map((entry) => (
+                <div key={entry.id} className="rounded-xl border border-border bg-surface px-3 py-2 text-xs">
+                  <div className="flex items-center justify-between gap-2"><p className="font-semibold">{entry.title}</p><span className="capitalize text-textMuted">{entry.category}</span></div>
+                  <p className="mt-1 text-textMuted">{entry.detail}</p>
+                  <p className="mt-1 text-[11px] text-textMuted">{new Date(entry.createdAt).toLocaleString()}</p>
+                </div>
+              )) : <p className="text-sm text-textMuted">No trades, gambles, or purchases yet.</p>}
+            </div>
+          </details>
         </aside>
 
         <button

@@ -229,7 +229,9 @@ export const claimDailyReward = onCall(async (request) => {
         throw new HttpsError("unauthenticated", "You must be signed in.");
     }
     const userRef = db.collection("users").doc(request.auth.uid);
-    const today = new Date().toISOString().slice(0, 10);
+    const now = Date.now();
+    const cooldownMs = 12 * 60 * 60 * 1000;
+    const today = new Date(now).toISOString().slice(0, 10);
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     let reward = 0;
     let streak = 0;
@@ -238,19 +240,48 @@ export const claimDailyReward = onCall(async (request) => {
         if (!snapshot.exists) {
             throw new HttpsError("not-found", "Your profile is missing.");
         }
-        if (snapshot.get("dailyClaimDate") === today) {
-            throw new HttpsError("already-exists", "Today's reward has already been claimed.");
+        const lastClaimAt = Number(snapshot.get("dailyClaimAt") ?? 0);
+        if (lastClaimAt && now - lastClaimAt < cooldownMs) {
+            throw new HttpsError("already-exists", "Your next reward is available in 12 hours.");
         }
-        streak = snapshot.get("dailyClaimDate") === yesterday ? Number(snapshot.get("dailyStreak") ?? 0) + 1 : 1;
+        streak = snapshot.get("dailyClaimDate") === today
+            ? Number(snapshot.get("dailyStreak") ?? 1)
+            : snapshot.get("dailyClaimDate") === yesterday ? Number(snapshot.get("dailyStreak") ?? 0) + 1 : 1;
         const baseReward = 100 + (streak - 1) * 25;
         reward = baseReward * (snapshot.get("isPremium") === true ? 2 : 1);
         const gems = Number(snapshot.get("gems") ?? 0);
         transaction.update(userRef, {
             gems: Number((gems + reward).toFixed(2)),
             dailyClaimDate: today,
+            dailyClaimAt: now,
             dailyStreak: streak,
             updatedAt: FieldValue.serverTimestamp(),
         });
     });
     return { reward, streak };
+});
+export const recordPostView = onCall(async (request) => {
+    if (!request.auth?.uid) {
+        throw new HttpsError("unauthenticated", "You must be signed in.");
+    }
+    const postId = typeof request.data?.postId === "string" ? request.data.postId : "";
+    if (!postId)
+        throw new HttpsError("invalid-argument", "A post id is required.");
+    const postRef = db.collection("posts").doc(postId);
+    const viewRef = db.collection("postViews").doc(`${postId}_${request.auth.uid}`);
+    let counted = false;
+    await db.runTransaction(async (transaction) => {
+        const [post, view] = await Promise.all([transaction.get(postRef), transaction.get(viewRef)]);
+        if (!post.exists)
+            throw new HttpsError("not-found", "Post not found.");
+        if (view.exists)
+            return;
+        const authorId = String(post.get("authorId") ?? "");
+        transaction.set(viewRef, { postId, userId: request.auth.uid, createdAt: FieldValue.serverTimestamp() });
+        transaction.update(postRef, { viewCount: FieldValue.increment(1) });
+        if (authorId)
+            transaction.update(db.collection("users").doc(authorId), { totalPostViews: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() });
+        counted = true;
+    });
+    return { counted };
 });

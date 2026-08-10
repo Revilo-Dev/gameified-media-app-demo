@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { subscribeToUserProfileByHandle } from "@/firebase/users";
 import type { UserProfile } from "@/types/models";
+import { getProfileCardStyle } from "@/constants/profile-cards";
 
 const ENTITY_PATTERN = /(@[a-zA-Z0-9_]+|#[a-zA-Z0-9_]+)/g;
 
@@ -27,29 +28,26 @@ function MentionEntity({
   }, [handle, open]);
 
   return (
-    <span className="relative inline-flex">
+    <span className="relative inline-flex" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
       <button
         type="button"
         className="font-semibold text-[color:var(--accent)]"
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
         onClick={() => {
           if (onClick) {
             onClick(value);
             return;
           }
-
-          navigate(`/profile/${handle}`);
+          setOpen(true);
         }}
       >
         {value}
       </button>
       {open && profile ? (
-        <span className="absolute left-0 top-6 z-20 min-w-52 rounded-2xl border border-border bg-canvas p-3 text-left shadow-panel">
+        <button type="button" onClick={() => navigate(`/profile/${handle}`)} className="absolute left-0 top-6 z-20 min-w-52 rounded-2xl border border-border p-3 text-left shadow-panel hover:brightness-110" style={{ background: getProfileCardStyle(profile.equippedProfileCardId).background }}>
           <span className="block text-sm font-semibold text-text">{profile.displayName}</span>
           <span className="block text-xs text-textMuted">@{profile.handle}</span>
           <span className="mt-2 block text-xs text-textMuted">{profile.bio}</span>
-        </span>
+        </button>
       ) : null}
     </span>
   );

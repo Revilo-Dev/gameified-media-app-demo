@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { arrayUnion, doc, updateDoc } from "firebase/firestore";
 import { Bookmark, Flag, MessageCircle, MoreHorizontal, Send, Star, Trash2 } from "lucide-react";
@@ -11,7 +11,7 @@ import { Card } from "@/components/common/card";
 import { InlineEntities } from "@/components/common/inline-entities";
 import { TomatoIcon } from "@/components/common/tomato-icon";
 import { UserBadges } from "@/components/common/user-badges";
-import { getProfileBorderStyle } from "@/constants/profile-borders";
+import { getProfileCardStyle } from "@/constants/profile-cards";
 import { setPostBookmarked, subscribeToBookmarkedPostIds } from "@/firebase/bookmarks";
 import { db } from "@/firebase/config";
 import { setFollowingRelationship, subscribeToFollowRelationship } from "@/firebase/follows";
@@ -55,15 +55,15 @@ export function PostCard({
   const [currentUserStars, setCurrentUserStars] = useState(0);
   const [hasThrownRottenTomato, setHasThrownRottenTomato] = useState(false);
   const [isTomatoAnimating, setIsTomatoAnimating] = useState(false);
+  const [isProfilePreviewOpen, setIsProfilePreviewOpen] = useState(false);
   const poll = post.poll ?? null;
   const pollEnded = poll ? new Date(poll.endsAt).getTime() <= Date.now() : false;
   const currentPollVote = poll && currentUserProfile ? poll.options.find((option) => poll.votes?.[option]?.includes(currentUserProfile.uid)) ?? null : null;
   const canDeletePost = Boolean(currentUserProfile && (currentUserProfile.uid === post.authorId || currentUserProfile.isModerator));
   const canDeleteEmbed = Boolean(currentUserProfile?.isModerator && (post.imageURL || post.gifURL || post.poll));
   const profilePath = author ? `/profile/${author.handle}` : "/";
-  const cardBorderStyle = author?.equippedProfileBorderId && author.equippedProfileBorderId !== "border-none"
-    ? getProfileBorderStyle(author.equippedProfileBorderId)
-    : null;
+  const disableEffects = Boolean(currentUserProfile?.displayPreferences?.disableNameEffects);
+  const disableBorders = Boolean(currentUserProfile?.displayPreferences?.disableProfileBorders);
   const imageUrls = (post.imageUrls?.length ? post.imageUrls : post.imageURL ? [post.imageURL] : []).slice(0, 3);
   const previousTomatoCountRef = useRef(post.rottenTomatoCount);
 
@@ -194,25 +194,33 @@ export function PostCard({
     }
   }
 
+  function openPostFromCard(event: ReactMouseEvent<HTMLDivElement>) {
+    if ((event.target as HTMLElement).closest("button, a, input, textarea, select, [data-no-post-open]")) return;
+    navigate(`/post/${post.parentPostId ?? post.id}`);
+  }
+
   return (
-    <div className={`rounded-3xl p-px ${post.parentPostId ? "" : "timeline-post-enter"}`} style={cardBorderStyle ?? undefined}>
-      <Card className={`relative overflow-visible border border-border p-3 sm:p-4 ${isTomatoAnimating ? "tomato-hit-flash" : ""}`}>
+    <div className={`rounded-3xl ${post.parentPostId ? "" : "timeline-post-enter"}`}>
+      <Card onClick={openPostFromCard} className={`relative cursor-pointer overflow-visible border border-border p-3 sm:p-4 ${isTomatoAnimating ? "tomato-hit-flash" : ""}`}>
       <div className="flex gap-3">
         <Avatar
           name={author?.displayName ?? "Unknown"}
           src={author?.photoURL ?? null}
           className="h-10 w-10 rounded-2xl"
           borderId={author?.equippedProfileBorderId}
+          disableBorder={disableBorders}
+          disableBorderAnimation
         />
         <div className="min-w-0 flex-1 space-y-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <button type="button" className="text-left text-sm font-semibold hover:underline" onClick={() => navigate(profilePath)}>
-                  <span style={getNameColorStyle(author?.equippedNameColorId)}>
-                    {author?.displayName ?? "Unknown profile"}
-                  </span>
-                </button>
+                <span className="relative" onMouseEnter={() => setIsProfilePreviewOpen(true)} onMouseLeave={() => setIsProfilePreviewOpen(false)}>
+                  <button type="button" className="text-left text-sm font-semibold hover:underline" onClick={() => navigate(profilePath)}>
+                    <span style={disableEffects ? undefined : getNameColorStyle(author?.equippedNameColorId)}>{author?.displayName ?? "Unknown profile"}</span>
+                  </button>
+                  {isProfilePreviewOpen && author ? <span className="absolute left-0 top-6 z-30 block w-60 rounded-2xl border border-border p-3 text-left shadow-panel" style={{ background: getProfileCardStyle(author.equippedProfileCardId).background }}><span className="block font-semibold">{author.displayName}</span><span className="block text-xs text-textMuted">@{author.handle} · Level {author.level}</span><span className="mt-2 block line-clamp-2 text-xs text-textMuted">{author.bio || "No bio yet."}</span></span> : null}
+                </span>
                 {author ? <span className="rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--accent)]">Lv {author.level}</span> : null}
                 {author ? <UserBadges user={author} /> : null}
               </div>
@@ -336,15 +344,11 @@ export function PostCard({
             </div>
           </div>
 
-          <button
-            type="button"
-            className="block w-full text-left"
-            onClick={() => navigate(`/post/${post.parentPostId ?? post.id}`)}
-          >
+          <div className="block w-full text-left">
             <p className="break-words [overflow-wrap:anywhere] text-sm leading-6 text-text">
               <InlineEntities text={post.content} />
             </p>
-          </button>
+          </div>
 
           {post.gifURL ? <img src={post.gifURL} alt="Attached GIF" loading="eager" decoding="async" fetchPriority={priority === "high" ? "high" : "auto"} className="max-h-[20rem] w-full rounded-3xl border border-border object-cover" /> : null}
           {imageUrls.length ? (

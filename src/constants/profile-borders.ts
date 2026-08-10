@@ -19,7 +19,12 @@ export const PROFILE_BORDER_OPTIONS: ProfileBorderOption[] = [
   { id: "animated-galaxy", name: "Galaxy Spin", price: 1800, rarity: "legendary", description: "Purple-blue loop for loud profile presentation.", preview: "linear-gradient(90deg, #a78bfa, #60a5fa, #f472b6, #a78bfa)", animated: true },
   { id: "animated-auric", name: "Auric Halo", price: 1950, rarity: "legendary", description: "Gold, ivory, and rose light orbiting the profile edge.", preview: "linear-gradient(90deg, #facc15, #fef3c7, #fb7185, #facc15)", animated: true },
   { id: "animated-tidal", name: "Tidal Current", price: 2100, rarity: "legendary", description: "Aqua and deep-blue current with a clean moving edge.", preview: "linear-gradient(90deg, #67e8f9, #0ea5e9, #6366f1, #67e8f9)", animated: true },
-];
+  { id: "animated-aurora-pulse", name: "Aurora Pulse", price: 0, rarity: "legendary", description: "A mint-violet ring that pulses with light.", preview: "linear-gradient(90deg,#86efac,#a78bfa,#67e8f9,#86efac)", animated: true, effect: "pulse" },
+  { id: "animated-solar-glow", name: "Solar Glow", price: 0, rarity: "legendary", description: "A bright amber ring with a glowing edge.", preview: "linear-gradient(90deg,#fef08a,#fb923c,#fb7185,#fef08a)", animated: true, effect: "glow" },
+  { id: "animated-orbit-spin", name: "Orbit Spin", price: 0, rarity: "legendary", description: "A cyan-violet orbiting profile frame.", preview: "conic-gradient(#22d3ee,#818cf8,#e879f9,#22d3ee)", animated: true, effect: "spin" },
+  { id: "animated-rose-pulse", name: "Rose Pulse", price: 0, rarity: "legendary", description: "A soft rose halo with a steady pulse.", preview: "linear-gradient(90deg,#fda4af,#f0abfc,#fb7185,#fda4af)", animated: true, effect: "pulse" },
+  { id: "animated-jade-glow", name: "Jade Glow", price: 0, rarity: "legendary", description: "A radiant jade edge with a deep glow.", preview: "linear-gradient(90deg,#86efac,#2dd4bf,#a3e635,#86efac)", animated: true, effect: "glow" },
+].map((option, index) => index === 0 ? option : { ...option, price: 1000 + (index - 1) * 500 }) as ProfileBorderOption[];
 
 export function getProfileBorderOption(borderId: string | null | undefined) {
   return PROFILE_BORDER_OPTIONS.find((option) => option.id === borderId) ?? PROFILE_BORDER_OPTIONS[0];
@@ -31,6 +36,11 @@ export function getProfileBorderStyle(borderId: string | null | undefined) {
   return {
     background: option.preview,
     backgroundSize: option.animated ? "200% 200%" : undefined,
-    animation: option.animated ? "nameplate-gradient-shift 5s linear infinite" : undefined,
+    animation: !option.animated ? undefined : option.effect === "glow" ? "border-glow 2.4s ease-in-out infinite" : option.effect === "pulse" ? "border-pulse 1.8s ease-in-out infinite" : option.effect === "spin" ? "border-spin 4s linear infinite" : "nameplate-gradient-shift 5s linear infinite",
   };
+}
+
+export function getProfileBorderPreviewStyle(borderId: string | null | undefined) {
+  const style = getProfileBorderStyle(borderId);
+  return { ...style, animation: undefined, transform: undefined, filter: undefined, boxShadow: undefined };
 }

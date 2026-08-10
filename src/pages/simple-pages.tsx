@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -15,11 +15,13 @@ import { SlotMachine } from "@/components/gamification/slot-machine";
 import { CoinToss } from "@/components/gamification/coin-toss";
 import { DiceGame } from "@/components/gamification/dice-game";
 import { MinesGame } from "@/components/gamification/mines-game";
+import { WheelSpin } from "@/components/gamification/wheel-spin";
+import { ReactionTest } from "@/components/gamification/reaction-test";
 import { shopItems, users } from "@/lib/demo-data";
 import { bannerPresets } from "@/lib/banner-presets";
 import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/auth";
 import { useAuth } from "@/app/auth-provider";
-import { addGemsToUser, addXpToUser, ensureUserProfile, executeCoinPurchase, executeCoinSale, getDemoUserByHandle, isHandleAvailable, subscribeToUserLeaderboard, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToUserProfiles, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
+import { addGemsToUser, addXpToUser, ensureUserProfile, executeCoinPurchase, executeCoinSale, getDemoUserByHandle, isHandleAvailable, recordActivity, subscribeToUserLeaderboard, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToUserProfiles, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
 import { changeUserPassword, linkGoogleAccount, updateDisplayName, uploadProfileBanner, uploadProfilePicture } from "@/firebase/auth";
 import { deletePostCascade, subscribeToPosts, subscribeToPostsByAuthor } from "@/firebase/posts";
 import { InlineEntities } from "@/components/common/inline-entities";
@@ -28,10 +30,11 @@ import { setFollowingRelationship, subscribeToFollowerIds, subscribeToFollowCoun
 import { useUiStore } from "@/store/use-ui-store";
 import { getXpProgress } from "@/constants/gamification";
 import { getNameColorStyle, getNameColorValue, NAME_COLOR_OPTIONS } from "@/constants/name-colors";
-import { PROFILE_BORDER_OPTIONS, getProfileBorderStyle } from "@/constants/profile-borders";
+import { PROFILE_BORDER_OPTIONS, getProfileBorderPreviewStyle } from "@/constants/profile-borders";
+import { PROFILE_CARD_OPTIONS, getProfileCardStyle } from "@/constants/profile-cards";
 import { themePresets } from "@/lib/theme-presets";
 import { readCache, writeCache } from "@/lib/persistent-cache";
-import { banUserAccount, claimDailyReward, resetAllCrypto, resetAllGems } from "@/firebase/functions";
+import { banUserAccount, recordPostView, resetAllCrypto, resetAllGems } from "@/firebase/functions";
 import { sendDirectMessage, startConversation, subscribeToAllConversations, subscribeToConversationMessages, subscribeToConversations } from "@/firebase/chat";
 import { createInitialCryptoMarketState, moderateCryptoMarket, subscribeToCryptoMarket, type CryptoMarketState } from "@/firebase/crypto-market";
 import { subscribeToBookmarkedPosts } from "@/firebase/bookmarks";
@@ -41,6 +44,7 @@ import { UserBadges } from "@/components/common/user-badges";
 import { PostCard } from "@/components/posts/post-card";
 import { PostComposer } from "@/components/posts/post-composer";
 import { formatAmount } from "@/lib/utils";
+import { requestBrowserNotificationPermission, sendBrowserAlert } from "@/lib/browser-alerts";
 import type { Conversation, CryptoCoinId, Message, NotificationItem, Post, ThemeMode, UserProfile } from "@/types/models";
 
 function getFirebaseErrorMessage(error: unknown) {
@@ -159,6 +163,17 @@ function getNotificationVisual(type: NotificationItem["type"]) {
 
 const changelogEntries = [
   {
+    version: "V0.9",
+    date: "Latest",
+    items: [
+      "Added browser alerts and tab-title pings for notifications and incoming chat messages.",
+      "Reworked Messages so moderator chat inspection is separate from personal conversations.",
+      "Added Wheel Spin and Reaction Test, with Arcade games organized into tabs.",
+      "Expanded market cosmetics with profile cards, themes, borders, and animated nameplates.",
+      "Improved profile loading by deferring post data until its tab is opened.",
+    ],
+  },
+  {
     version: "V0.8",
     date: "August 4, 2026",
     items: [
@@ -248,31 +263,16 @@ const BIO_MAX_LENGTH = 180;
 const LOCATION_MAX_LENGTH = 60;
 const DISPLAY_NAME_PATTERN = /^[A-Za-z0-9 ]+$/;
 const HANDLE_PATTERN = /^[a-z0-9_]+$/;
-const BASE_DAILY_GEM_REWARD = 100;
-const PREMIUM_DAILY_GEM_MULTIPLIER = 2;
 const FREE_THEME_IDS: ThemeMode[] = ["graphite", "mist"];
 const EXPLORE_PAGE_SIZE = 50;
 const THEME_MARKET_PRICES: Record<ThemeMode, number> = {
   graphite: 0,
   mist: 0,
-  oled: 1400,
-  aurora: 1800,
-  nordic: 2200,
-  synthwave: 2600,
-  solarizedLight: 3000,
-  midnightRose: 3400,
-  lagoon: 3600,
-  sunsetClub: 3800,
-  citrusPunch: 4100,
-  polarNight: 4300,
-  roseQuartz: 4500,
-  acidWash: 4700,
-  emberDusk: 4900,
-  deepSea: 5200,
-  monochrome: 5500,
-  orchard: 5800,
-  ultraviolet: 6100,
-  copperline: 6400,
+  oled: 1000, aurora: 1500, nordic: 2000, synthwave: 2500, solarizedLight: 3000,
+  midnightRose: 3500, lagoon: 4000, sunsetClub: 4500, citrusPunch: 5000, polarNight: 5500,
+  roseQuartz: 6000, acidWash: 6500, emberDusk: 7000, deepSea: 7500, monochrome: 8000,
+  orchard: 8500, ultraviolet: 9000, copperline: 9500, neonHarbor: 10000, velvetOrbit: 10500,
+  moonlitInk: 11000, jadeCircuit: 11500, apricotGlow: 12000,
 };
 
 function getOwnedThemeIds(profile: Pick<UserProfile, "ownedThemeIds" | "theme">) {
@@ -281,10 +281,6 @@ function getOwnedThemeIds(profile: Pick<UserProfile, "ownedThemeIds" | "theme">)
 
 function formatInventoryRarityLabel(rarity: string) {
   return rarity.charAt(0).toUpperCase() + rarity.slice(1);
-}
-
-function getDailyGemReward(isPremium: boolean, streak = 1) {
-  return (BASE_DAILY_GEM_REWARD + Math.max(0, streak - 1) * 25) * (isPremium ? PREMIUM_DAILY_GEM_MULTIPLIER : 1);
 }
 
 function ReplyCard({
@@ -560,10 +556,8 @@ export function ProfilePage() {
   const [followsViewer, setFollowsViewer] = useState(false);
   const [isTogglingFollow, setIsTogglingFollow] = useState(false);
   const [allUserPosts, setAllUserPosts] = useState<Post[]>([]);
-  const [allPosts, setAllPosts] = useState<Post[]>([]);
-  const [profileTab, setProfileTab] = useState<"posts" | "replies" | "stats" | "inventory">("posts");
+  const [profileTab, setProfileTab] = useState<"posts" | "replies" | "stats" | "inventory">("stats");
   const [leaderboardRank, setLeaderboardRank] = useState<number | null>(null);
-  const [parentAuthors, setParentAuthors] = useState<Record<string, (typeof users)[number] | null>>({});
   const [followModalTab, setFollowModalTab] = useState<"followers" | "following" | null>(null);
   const [followerIds, setFollowerIds] = useState<string[]>([]);
   const [followingIds, setFollowingIds] = useState<string[]>([]);
@@ -572,6 +566,9 @@ export function ProfilePage() {
   const [editingModeratorValue, setEditingModeratorValue] = useState<"level" | "gems" | null>(null);
   const [moderatorValue, setModeratorValue] = useState("");
   const [isSavingModeratorValue, setIsSavingModeratorValue] = useState(false);
+  const [isEditingCoinHoldings, setIsEditingCoinHoldings] = useState(false);
+  const [coinHoldingValues, setCoinHoldingValues] = useState<Partial<Record<CryptoCoinId, string>>>({});
+  const [isSavingStats, setIsSavingStats] = useState(false);
 
   useEffect(() => {
     if (!authUser) {
@@ -628,18 +625,16 @@ export function ProfilePage() {
   }, [currentUserId, user?.followingCount, user?.followerCount, user?.uid]);
 
   useEffect(() => {
-    if (!user?.uid) {
+    if (!user?.uid || (profileTab !== "posts" && profileTab !== "replies")) {
       setAllUserPosts([]);
       return;
     }
 
     return subscribeToPostsByAuthor(user.uid, setAllUserPosts);
-  }, [user?.uid]);
-
-  useEffect(() => subscribeToPosts(setAllPosts), []);
+  }, [profileTab, user?.uid]);
 
   useEffect(() => {
-    if (!user?.uid) {
+    if (!user?.uid || profileTab !== "stats") {
       setLeaderboardRank(null);
       return;
     }
@@ -648,7 +643,7 @@ export function ProfilePage() {
       const rank = leaders.findIndex((leader) => leader.uid === user.uid);
       setLeaderboardRank(rank >= 0 ? rank + 1 : null);
     });
-  }, [user?.uid]);
+  }, [profileTab, user?.uid]);
 
   useEffect(() => {
     if (!user?.uid || !followModalTab) {
@@ -689,21 +684,6 @@ export function ProfilePage() {
   const isMutual = isFollowing && followsViewer;
   const canViewPosts = !user?.isPrivate || isOwnProfile || isMutual;
 
-  useEffect(() => {
-    if (!userReplies.length) {
-      setParentAuthors({});
-      return;
-    }
-
-    const nextParentAuthors = userReplies.reduce<Record<string, (typeof users)[number] | null>>((accumulator, reply) => {
-      const parentPost = allPosts.find((candidate) => candidate.id === reply.parentPostId);
-      accumulator[reply.id] = parentPost ? users.find((candidate) => candidate.uid === parentPost.authorId) ?? null : null;
-      return accumulator;
-    }, {});
-
-    setParentAuthors(nextParentAuthors);
-  }, [allPosts, userReplies]);
-
   const visibleFollowIds = useMemo(
     () => (followModalTab === "followers" ? followerIds : followModalTab === "following" ? followingIds : []),
     [followModalTab, followerIds, followingIds],
@@ -734,7 +714,7 @@ export function ProfilePage() {
   );
   const timeoutLabel = getTimeoutRemainingLabel(user?.timeoutUntil);
   const canModerateInventory = Boolean(currentUserProfile?.isModerator);
-  const canEditModeratorValues = Boolean(currentUserProfile?.isModerator && !isOwnProfile);
+  const canEditModeratorValues = Boolean(currentUserProfile?.isModerator);
 
   function beginModeratorValueEdit(field: "level" | "gems") {
     if (!user || !canEditModeratorValues) {
@@ -769,6 +749,49 @@ export function ProfilePage() {
       toast.error(getFirebaseErrorMessage(error));
     } finally {
       setIsSavingModeratorValue(false);
+    }
+  }
+
+  function beginCoinHoldingEdit() {
+    if (!user || !canEditModeratorValues) return;
+    setCoinHoldingValues(Object.fromEntries(CRYPTO_COINS.map((coin) => [coin.id, String(user.coinHoldings?.[coin.id] ?? 0)])) as Record<CryptoCoinId, string>);
+    setIsEditingCoinHoldings(true);
+  }
+
+  async function saveCoinHoldings() {
+    if (!user) return;
+    const nextHoldings = {} as Record<CryptoCoinId, number>;
+    for (const coin of CRYPTO_COINS) {
+      const value = Number(coinHoldingValues[coin.id] ?? 0);
+      if (!Number.isFinite(value) || value < 0) {
+        toast.error("Coin holdings must be non-negative numbers.");
+        return;
+      }
+      nextHoldings[coin.id] = Number(value.toFixed(2));
+    }
+    setIsSavingStats(true);
+    try {
+      await updateUserProfile(user.uid, { coinHoldings: nextHoldings });
+      setIsEditingCoinHoldings(false);
+      toast.success("Coin holdings updated");
+    } catch (error) {
+      toast.error(getFirebaseErrorMessage(error));
+    } finally {
+      setIsSavingStats(false);
+    }
+  }
+
+  async function resetUserStats() {
+    if (!user || !canEditModeratorValues || !window.confirm(`Reset ${user.displayName}'s profile stats? This cannot be undone.`)) return;
+    const emptyHoldings = Object.fromEntries(CRYPTO_COINS.map((coin) => [coin.id, 0])) as Record<CryptoCoinId, number>;
+    setIsSavingStats(true);
+    try {
+      await updateUserProfile(user.uid, { xp: 0, level: 1, gems: 0, casinoCoins: 0, gamblingGains: 0, gamblingLosses: 0, coinHoldings: emptyHoldings, coinInvestmentTotals: emptyHoldings, totalPostViews: 0, rottenTomatoCount: 0 });
+      toast.success("Profile stats reset");
+    } catch (error) {
+      toast.error(getFirebaseErrorMessage(error));
+    } finally {
+      setIsSavingStats(false);
     }
   }
 
@@ -825,8 +848,7 @@ export function ProfilePage() {
 
   return (
     <div className="space-y-5">
-      <div className="rounded-3xl p-px" style={user.equippedProfileBorderId && user.equippedProfileBorderId !== "border-none" ? getProfileBorderStyle(user.equippedProfileBorderId) : undefined}>
-      <Card className="overflow-hidden border border-border p-0">
+      <Card className="overflow-hidden border border-border p-0" style={{ background: getProfileCardStyle(user.equippedProfileCardId).background }}>
         <div className="h-36 w-full sm:h-44" style={formatBannerStyle(user)} />
         <div className="space-y-4 p-5 sm:p-6">
           <div className="flex flex-col gap-4">
@@ -836,11 +858,12 @@ export function ProfilePage() {
                   name={user.displayName}
                   src={user.photoURL}
                   className="h-20 w-20 rounded-3xl sm:h-24 sm:w-24"
+                  borderId={!currentUserProfile?.displayPreferences?.disableProfileBorders ? user.equippedProfileBorderId : undefined}
                 />
               </div>
               <div className="min-w-0 flex-1 pb-1">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <p className="min-w-0 text-2xl font-bold" style={getNameColorStyle(user.equippedNameColorId)}>{user.displayName}</p>
+                  <p className="min-w-0 text-2xl font-bold" style={currentUserProfile?.displayPreferences?.disableNameEffects ? undefined : getNameColorStyle(user.equippedNameColorId)}>{user.displayName}</p>
                   <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
                     <Button
                       variant={isOwnProfile || isFollowing ? "secondary" : "primary"}
@@ -947,11 +970,21 @@ export function ProfilePage() {
                 <strong>{followCounts.following}</strong> Following
               </button>
             </div>
-            <XpProgress xp={user.xp} level={user.level} />
+            {editingModeratorValue === "level" ? (
+              <form className="flex items-center gap-2 rounded-2xl border border-[color:var(--accent)] bg-surfaceAlt/50 px-3 py-2" onSubmit={(event) => { event.preventDefault(); void saveModeratorValue("level"); }}>
+                <label htmlFor="moderator-level" className="text-xs text-textMuted">Level</label>
+                <input id="moderator-level" autoFocus inputMode="numeric" min="1" step="1" value={moderatorValue} onChange={(event) => setModeratorValue(event.target.value)} className="min-w-0 flex-1 bg-transparent font-semibold tabular-nums outline-none" />
+                <button type="submit" disabled={isSavingModeratorValue} className="rounded p-1 text-emerald-400 hover:bg-surface" aria-label="Save level"><Check size={15} /></button>
+                <button type="button" disabled={isSavingModeratorValue} className="rounded p-1 text-textMuted hover:bg-surface" aria-label="Cancel level edit" onClick={() => setEditingModeratorValue(null)}><X size={15} /></button>
+              </form>
+            ) : (
+              <button type="button" className={`w-full text-left ${canEditModeratorValues ? "cursor-pointer" : "cursor-default"}`} disabled={!canEditModeratorValues} onClick={() => beginModeratorValueEdit("level")} title={canEditModeratorValues ? "Click the level bar to adjust this user's level" : undefined}>
+                <XpProgress xp={user.xp} level={user.level} />
+              </button>
+            )}
           </div>
         </div>
       </Card>
-      </div>
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -984,7 +1017,6 @@ export function ProfilePage() {
             Inventory
           </button>
         </div>
-
         {!canViewPosts ? (
           <Card className="space-y-2 p-6 text-sm text-textMuted">
             <p className="inline-flex items-center gap-2 font-semibold text-text"><Lock size={16} /> Private profile</p>
@@ -992,6 +1024,7 @@ export function ProfilePage() {
           </Card>
         ) : profileTab === "stats" ? (
           <Card className="space-y-4 p-5">
+            {canEditModeratorValues ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[color:var(--accent)]/35 bg-[color:var(--accent)]/5 px-4 py-3"><p className="text-sm font-semibold">Admin stat controls</p><Button type="button" variant="ghost" size="sm" disabled={isSavingStats} className="border border-red-400/40 text-red-400 hover:text-red-300" onClick={() => void resetUserStats()}>Reset stats</Button></div> : null}
             <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3">
               <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Gems</p>
@@ -1019,7 +1052,8 @@ export function ProfilePage() {
             </div>
             </div>
             <div className="rounded-2xl border border-border bg-surfaceAlt/35 p-4">
-              <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Owned coins</p>
+              <div className="flex items-center justify-between gap-3"><p className="text-xs uppercase tracking-[0.16em] text-textMuted">Owned coins</p>{canEditModeratorValues ? <Button type="button" variant="secondary" size="sm" disabled={isSavingStats} onClick={() => isEditingCoinHoldings ? void saveCoinHoldings() : beginCoinHoldingEdit()}>{isEditingCoinHoldings ? "Save holdings" : "Edit holdings"}</Button> : null}</div>
+              {isEditingCoinHoldings ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{CRYPTO_COINS.map((coin) => <label key={coin.id} className="rounded-xl border border-border bg-surface px-3 py-2 text-xs"><span className="font-semibold" style={{ color: coin.accent }}>{coin.name}</span><input inputMode="decimal" value={coinHoldingValues[coin.id] ?? "0"} onChange={(event) => setCoinHoldingValues((current) => ({ ...current, [coin.id]: event.target.value }))} className="mt-1 w-full bg-transparent text-sm font-semibold outline-none" /></label>)}<Button type="button" variant="ghost" size="sm" className="justify-self-start" onClick={() => setIsEditingCoinHoldings(false)}>Cancel</Button></div> : null}
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 {CRYPTO_COINS.filter((coin) => (user.coinHoldings?.[coin.id] ?? 0) > 0).length ? CRYPTO_COINS.filter((coin) => (user.coinHoldings?.[coin.id] ?? 0) > 0).map((coin) => (
                   <div key={coin.id} className="rounded-[1.4rem] border border-border bg-[linear-gradient(135deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
@@ -1090,7 +1124,7 @@ export function ProfilePage() {
                         <p className="mt-1 text-xs text-textMuted">{option.description}</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <div className="h-10 w-10 shrink-0 rounded-2xl p-[3px]" style={getProfileBorderStyle(option.id)}>
+                        <div className="h-10 w-10 shrink-0 rounded-2xl p-[3px]" style={getProfileBorderPreviewStyle(option.id)}>
                           <div className="h-full w-full rounded-[13px] bg-canvas" />
                         </div>
                         {canModerateInventory && option.id !== "border-none" ? (
@@ -1150,7 +1184,7 @@ export function ProfilePage() {
               <PostCard
                 key={reply.id}
                 post={reply}
-                replyContextLabel={parentAuthors[reply.id] ? `@${parentAuthors[reply.id]?.handle}` : null}
+                replyContextLabel={null}
               />
             ))}
           </div>
@@ -1192,6 +1226,7 @@ export function SettingsPage() {
     .map((colorId) => NAME_COLOR_OPTIONS.find((item) => item.id === colorId))
     .filter((option): option is (typeof NAME_COLOR_OPTIONS)[number] => Boolean(option));
   const notificationPreferences = profile?.notificationPreferences ?? { replies: true, mentions: true, follows: true, reactions: true, rewards: true, reports: true };
+  const displayPreferences = profile?.displayPreferences ?? { disableProfileBorders: false, disableNameEffects: false };
 
   return (
     <PageFrame title="Settings" subtitle="Appearance, account controls, and release notes live here.">
@@ -1274,6 +1309,11 @@ export function SettingsPage() {
               className="w-full accent-[color:var(--accent)]"
             />
           </div>
+          <div className="space-y-2">
+            <p className="text-sm font-semibold">Display effects</p>
+            <label className="flex items-center gap-3 rounded-xl border border-border bg-surfaceAlt/30 px-3 py-2 text-sm"><input type="checkbox" checked={displayPreferences.disableProfileBorders} disabled={!user || !profile} onChange={(event) => { if (user && profile) void updateUserProfile(user.uid, { displayPreferences: { ...displayPreferences, disableProfileBorders: event.target.checked } }); }} className="h-4 w-4 accent-[color:var(--accent)]" />Disable profile borders</label>
+            <label className="flex items-center gap-3 rounded-xl border border-border bg-surfaceAlt/30 px-3 py-2 text-sm"><input type="checkbox" checked={displayPreferences.disableNameEffects} disabled={!user || !profile} onChange={(event) => { if (user && profile) void updateUserProfile(user.uid, { displayPreferences: { ...displayPreferences, disableNameEffects: event.target.checked } }); }} className="h-4 w-4 accent-[color:var(--accent)]" />Disable name effects</label>
+          </div>
         </details>
 
         <details open className="rounded-2xl border border-border bg-surface">
@@ -1281,6 +1321,7 @@ export function SettingsPage() {
           <div className="space-y-5 border-t border-border p-5">
             <p className="text-sm text-textMuted">Profile, privacy, and media settings are managed from your profile editor.</p>
             <Link to={profile ? `/profile/${profile.handle}` : "/"} className="inline-flex rounded-full border border-border bg-surfaceAlt px-4 py-2 text-sm font-semibold">Manage profile</Link>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surfaceAlt/30 px-3 py-3"><div><p className="font-semibold">Browser alerts</p><p className="text-sm text-textMuted">Receive native alerts and tab pings for notifications and messages.</p></div><Button type="button" variant="secondary" onClick={() => void requestBrowserNotificationPermission().then((permission) => toast(permission === "granted" ? "Browser alerts enabled" : permission === "unsupported" ? "Browser alerts are unavailable" : "Browser alert permission was not granted"))}>Enable alerts</Button></div>
             <div className="space-y-3"><div><p className="font-semibold">Notifications</p><p className="text-sm text-textMuted">Choose the activity that should reach your inbox.</p></div><div className="grid gap-2 sm:grid-cols-2">{([ ["replies", "Replies"], ["mentions", "Mentions"], ["follows", "New followers"], ["reactions", "Ratings and reactions"], ["rewards", "Rewards and level-ups"], ["reports", "Moderator reports"] ] as const).map(([key, label]) => <label key={key} className="flex items-center gap-3 rounded-xl border border-border bg-surfaceAlt/30 px-3 py-2 text-sm"><input type="checkbox" checked={notificationPreferences[key]} disabled={!user || !profile} onChange={(event) => { if (user && profile) void updateUserProfile(user.uid, { notificationPreferences: { ...notificationPreferences, [key]: event.target.checked } }); }} className="h-4 w-4 accent-[color:var(--accent)]" />{label}</label>)}</div></div>
           </div>
         </details>
@@ -2027,6 +2068,7 @@ export function OnboardingPage() {
 }
 
 export function PostPage() {
+  const { user } = useAuth();
   const { postId } = useParams();
   const navigate = useNavigate();
   const [posts, setPosts] = useState<Post[]>([]);
@@ -2038,6 +2080,11 @@ export function PostPage() {
 
   const post = posts.find((item: Post) => item.id === postId);
   const replies = useMemo(() => posts.filter((item: Post) => item.parentPostId === postId), [posts, postId]);
+
+  useEffect(() => {
+    if (!user || !postId || !post || post.authorId === user.uid) return;
+    void recordPostView(postId).catch(() => undefined);
+  }, [post, postId, user]);
 
   useEffect(() => {
     const relevantUserIds = Array.from(new Set(
@@ -2173,22 +2220,14 @@ export function PostPage() {
               <p className="text-sm text-textMuted">No comments yet.</p>
             )}
           </Card>
-          <div className="sticky bottom-20 z-30 rounded-[2rem] border border-border bg-canvas/95 p-3 shadow-panel backdrop-blur sm:bottom-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <p className="font-semibold">{replyTarget ? "Replying to a comment" : "Add a reply"}</p>
-                <p className="text-sm text-textMuted">
-                  {replyTarget
-                    ? `Your reply will nest under ${getReplyContextLabel(replyTarget) ?? "this comment"}.`
-                    : "Replying here keeps the thread connected to the original post."}
-                </p>
-              </div>
+          <div className="sticky bottom-20 z-30 sm:bottom-4">
+            {replyTarget ? <div className="mb-2 flex justify-end">
               {replyTarget ? (
                 <Button variant="secondary" size="sm" onClick={() => setReplyTargetId(null)}>
                   Clear target
                 </Button>
               ) : null}
-            </div>
+            </div> : null}
             <PostComposer
               parentPost={post}
               replyToPost={replyTarget && replyTarget.id !== post.id ? replyTarget : undefined}
@@ -2209,11 +2248,17 @@ export function ChatPage() {
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [followerIds, setFollowerIds] = useState<string[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [adminConversations, setAdminConversations] = useState<Conversation[]>([]);
+  const [inspectedConversationId, setInspectedConversationId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [activeConversationId, setActiveConversationId] = useState("");
   const [draft, setDraft] = useState("");
   const [isStartingChat, setIsStartingChat] = useState(false);
-  const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId) ?? conversations[0] ?? null;
+  const messageIdsRef = useRef<string[] | null>(null);
+  const activeConversation = inspectedConversationId
+    ? adminConversations.find((conversation) => conversation.id === inspectedConversationId) ?? null
+    : conversations.find((conversation) => conversation.id === activeConversationId) ?? conversations[0] ?? null;
+  const canSendMessage = Boolean(user && activeConversation?.participantIds.includes(user.uid));
   const profilesById = useMemo(() => new Map(profiles.map((item) => [item.uid, item])), [profiles]);
   const mutualProfiles = useMemo(() => profiles.filter((item) => followingIds.includes(item.uid) && followerIds.includes(item.uid)), [followerIds, followingIds, profiles]);
   const isModerator = Boolean(profile?.isModerator);
@@ -2222,6 +2267,7 @@ export function ChatPage() {
     if (!user) {
       setProfile(null);
       setConversations([]);
+      setAdminConversations([]);
       return;
     }
     return subscribeToUserProfileById(user.uid, setProfile);
@@ -2240,16 +2286,46 @@ export function ChatPage() {
   }, [user]);
 
   useEffect(() => {
+    const mutualIds = followingIds.filter((profileId) => followerIds.includes(profileId));
+    if (!mutualIds.length) return;
+    const unsubscribers = mutualIds.map((profileId) => subscribeToUserProfileById(profileId, (mutualProfile) => {
+      if (!mutualProfile) return;
+      setProfiles((current) => [...current.filter((item) => item.uid !== profileId), mutualProfile]);
+    }));
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [followerIds, followingIds]);
+
+  useEffect(() => {
     if (!user) return;
-    return isModerator ? subscribeToAllConversations(setConversations) : subscribeToConversations(user.uid, setConversations);
-  }, [isModerator, user]);
+    return subscribeToConversations(user.uid, setConversations);
+  }, [user]);
+
+  useEffect(() => {
+    if (!isModerator) {
+      setAdminConversations([]);
+      setInspectedConversationId("");
+      return;
+    }
+    return subscribeToAllConversations(setAdminConversations);
+  }, [isModerator]);
 
   useEffect(() => {
     if (!activeConversationId && conversations[0]) setActiveConversationId(conversations[0].id);
     if (activeConversationId && !conversations.some((item) => item.id === activeConversationId)) setActiveConversationId(conversations[0]?.id ?? "");
   }, [activeConversationId, conversations]);
 
-  useEffect(() => subscribeToConversationMessages(activeConversation?.id ?? null, setMessages), [activeConversation?.id]);
+  useEffect(() => {
+    messageIdsRef.current = null;
+    return subscribeToConversationMessages(activeConversation?.id ?? null, (nextMessages) => {
+      const previousIds = messageIdsRef.current;
+      if (previousIds && user) {
+        const newMessage = nextMessages.find((message) => !previousIds.includes(message.id) && message.senderId !== user.uid);
+        if (newMessage) sendBrowserAlert(`Message from ${conversationTitle(activeConversation!)}`, newMessage.body);
+      }
+      messageIdsRef.current = nextMessages.map((message) => message.id);
+      setMessages(nextMessages);
+    });
+  }, [activeConversation?.id, user]);
 
   const sendMessage = async () => {
     if (!user || !activeConversation || !draft.trim()) {
@@ -2260,8 +2336,12 @@ export function ChatPage() {
 
   async function beginChat(contact: UserProfile) {
     if (!user) return;
+    if (!followingIds.includes(contact.uid) || !followerIds.includes(contact.uid)) {
+      toast.error("You can only start chats with mutual follows.");
+      return;
+    }
     setIsStartingChat(true);
-    try { setActiveConversationId(await startConversation(user.uid, contact.uid, contact.displayName)); } catch (error) { toast.error(getFirebaseErrorMessage(error)); } finally { setIsStartingChat(false); }
+    try { setInspectedConversationId(""); setActiveConversationId(await startConversation(user.uid, contact.uid, contact.displayName)); } catch (error) { toast.error(getFirebaseErrorMessage(error)); } finally { setIsStartingChat(false); }
   }
 
   function conversationTitle(conversation: Conversation) {
@@ -2270,16 +2350,17 @@ export function ChatPage() {
   }
 
   return (
-    <PageFrame title="Messages" subtitle={isModerator ? "Review site conversations and moderate message activity." : "Chat privately with people you both follow."}>
+    <PageFrame title="Messages" subtitle="Chat privately with people you both follow.">
       {!user ? <Card className="p-6 text-sm text-textMuted">Sign in to use direct messages.</Card> : (
       <Card className="flex min-h-[620px] flex-col overflow-hidden p-0">
           <div className="flex items-center gap-3 overflow-x-auto border-b border-border p-4">
-            {isModerator ? <select value={activeConversationId} onChange={(event) => setActiveConversationId(event.target.value)} className="min-w-56 rounded-xl border border-border bg-surface px-3 py-2 text-sm"><option value="">All chats</option>{conversations.map((item) => <option key={item.id} value={item.id}>{conversationTitle(item)}</option>)}</select> : mutualProfiles.map((contact) => <button key={contact.uid} type="button" disabled={isStartingChat} title={contact.displayName} onClick={() => void beginChat(contact)} className="group shrink-0"><Avatar name={contact.displayName} src={contact.photoURL} className="h-11 w-11 rounded-xl transition group-hover:ring-2 group-hover:ring-[color:var(--accent)]" /></button>)}
-            {!isModerator && !mutualProfiles.length ? <p className="text-sm text-textMuted">Mutually follow someone to start a direct message.</p> : null}
+            {mutualProfiles.map((contact) => <button key={contact.uid} type="button" disabled={isStartingChat} title={`Chat with ${contact.displayName}`} onClick={() => void beginChat(contact)} className="group shrink-0"><Avatar name={contact.displayName} src={contact.photoURL} className="h-11 w-11 rounded-xl transition group-hover:ring-2 group-hover:ring-[color:var(--accent)]" /></button>)}
+            {!mutualProfiles.length ? <p className="text-sm text-textMuted">Mutually follow someone to start a direct message.</p> : null}
           </div>
           <div className="flex items-center gap-3 border-b border-border px-5 py-4">
             <div className="grid h-9 w-9 place-items-center rounded-xl bg-accent/15 text-accent"><Users size={18} /></div>
-            <div><h2 className="font-semibold">{activeConversation ? conversationTitle(activeConversation) : "Select a conversation"}</h2><p className="text-xs text-textMuted">{isModerator ? "Moderator view" : "Mutual-follow direct message"}</p></div>
+            <div className="min-w-0 flex-1"><h2 className="font-semibold">{activeConversation ? conversationTitle(activeConversation) : "Select a conversation"}</h2><p className="text-xs text-textMuted">{inspectedConversationId ? "Admin inspection — read only" : "Mutual-follow direct message"}</p></div>
+            {isModerator ? <select value={inspectedConversationId} onChange={(event) => setInspectedConversationId(event.target.value)} className="min-w-48 rounded-xl border border-border bg-surface px-3 py-2 text-sm"><option value="">Admin: my chats</option>{adminConversations.filter((item) => !item.participantIds.includes(user.uid)).map((item) => <option key={item.id} value={item.id}>{item.title || item.participantIds.join(" / ")}</option>)}</select> : null}
           </div>
           <div className="flex-1 space-y-3 overflow-y-auto p-5">
             {messages.map((message) => {
@@ -2304,10 +2385,10 @@ export function ChatPage() {
                 }
               }}
               placeholder={activeConversation ? "Write a message" : "Choose a conversation first"}
-              disabled={!activeConversation || isModerator}
+              disabled={!canSendMessage || Boolean(inspectedConversationId)}
               className="min-w-0 flex-1 rounded-full border border-border bg-transparent px-4 py-2 text-sm outline-none focus:border-accent"
             />
-            <Button type="button" onClick={() => void sendMessage()} disabled={!draft.trim() || !activeConversation || isModerator} className="gap-2">
+            <Button type="button" onClick={() => void sendMessage()} disabled={!draft.trim() || !canSendMessage || Boolean(inspectedConversationId)} className="gap-2">
               <Send size={16} />
               Send
             </Button>
@@ -2558,61 +2639,13 @@ export function BookmarksPage() {
 }
 
 export function ArcadePage() {
-  const { user } = useAuth();
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [claimedToday, setClaimedToday] = useState(false);
-  const rewardKey = "pulsearc-daily-gems";
-
-  useEffect(() => {
-    setClaimedToday(window.localStorage.getItem(rewardKey) === new Date().toDateString());
-  }, []);
-
-  useEffect(() => {
-    if (!user) {
-      setProfile(null);
-      return;
-    }
-
-    return subscribeToUserProfileById(user.uid, setProfile);
-  }, [user]);
-
-  const rewardAmount = getDailyGemReward(profile?.isPremium ?? false, (profile?.dailyStreak ?? 0) + 1);
+  const [arcadeTab, setArcadeTab] = useState<"slots" | "mines" | "coin" | "dice" | "wheel" | "reaction">("slots");
 
   return (
-    <PageFrame title="Arcade" subtitle="Daily rewards and wager games.">
+    <PageFrame title="Arcade" subtitle="Wager games and quick challenges.">
       <div className="space-y-5">
-        <Card className="p-6">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="font-semibold">Daily gem reward</p>
-              <p className="text-sm text-textMuted">
-                {profile?.isPremium ? `Premium active: +${rewardAmount} gems per day.` : `Claim +${rewardAmount} gems once per day.`}
-              </p>
-            </div>
-            <Button
-              variant={claimedToday ? "secondary" : "primary"}
-              disabled={claimedToday}
-              onClick={async () => {
-                if (!user) {
-                  return;
-                }
-
-                const result = await claimDailyReward();
-                window.localStorage.setItem(rewardKey, new Date().toDateString());
-                setClaimedToday(true);
-                toast.success("Daily gems claimed", { description: `+${result.reward} gems added. ${result.streak} day streak.` });
-              }}
-            >
-              {claimedToday ? "Claimed" : `+${rewardAmount} Gems`}
-            </Button>
-          </div>
-        </Card>
-        <div className="space-y-5">
-          <SlotMachine />
-          <MinesGame />
-          <CoinToss />
-          <DiceGame />
-        </div>
+        <div className="flex flex-wrap gap-2">{([ ["slots", "Slots"], ["mines", "Mines"], ["coin", "Coin Toss"], ["dice", "Dice"], ["wheel", "Wheel Spin"], ["reaction", "Reaction Test"] ] as const).map(([id, label]) => <button key={id} type="button" onClick={() => setArcadeTab(id)} className={`rounded-full px-4 py-2 text-sm font-semibold transition ${arcadeTab === id ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}>{label}</button>)}</div>
+        {arcadeTab === "slots" ? <SlotMachine /> : arcadeTab === "mines" ? <MinesGame /> : arcadeTab === "coin" ? <CoinToss /> : arcadeTab === "dice" ? <DiceGame /> : arcadeTab === "wheel" ? <WheelSpin /> : <ReactionTest />}
       </div>
     </PageFrame>
   );
@@ -2661,6 +2694,7 @@ export function MarketPage() {
       ownedNameColorIds: [...new Set([...(profile.ownedNameColorIds ?? ["default"]), colorId])],
       equippedNameColorId: colorId,
     });
+    await recordActivity(user.uid, "purchase", option.name, `Purchased name color for ${formatAmount(option.price)} gems`, option.price);
     toast.success(`${option.name} purchased and equipped`);
   }
 
@@ -2693,6 +2727,7 @@ export function MarketPage() {
       ownedThemeIds: [...new Set([...ownedThemeIds, themeId])],
       theme: themeId,
     });
+    await recordActivity(user.uid, "purchase", option.label, `Purchased theme for ${formatAmount(option.price)} gems`, option.price);
     setTheme(themeId);
     toast.success(`${option.label} purchased and equipped`);
   }
@@ -2724,6 +2759,27 @@ export function MarketPage() {
       ownedProfileBorderIds: [...new Set([...(profile.ownedProfileBorderIds ?? ["border-none"]), borderId])],
       equippedProfileBorderId: borderId,
     });
+    await recordActivity(user.uid, "purchase", option.name, `Purchased profile border for ${formatAmount(option.price)} gems`, option.price);
+    toast.success(`${option.name} purchased and equipped`);
+  }
+
+  async function buyProfileCard(cardId: string) {
+    if (!user || !profile) return;
+    const option = PROFILE_CARD_OPTIONS.find((item) => item.id === cardId);
+    if (!option) return;
+    const owned = (profile.ownedProfileCardIds ?? ["card-default"]).includes(cardId);
+    if (owned) {
+      await updateUserProfile(user.uid, { equippedProfileCardId: cardId });
+      toast.success(`${option.name} equipped`);
+      return;
+    }
+    if (profile.gems < option.price) {
+      toast.error("Not enough gems for that profile card.");
+      return;
+    }
+    await addGemsToUser(user.uid, -option.price);
+    await updateUserProfile(user.uid, { ownedProfileCardIds: [...new Set([...(profile.ownedProfileCardIds ?? ["card-default"]), cardId])], equippedProfileCardId: cardId });
+    await recordActivity(user.uid, "purchase", option.name, `Purchased profile card for ${formatAmount(option.price)} gems`, option.price);
     toast.success(`${option.name} purchased and equipped`);
   }
 
@@ -2795,7 +2851,7 @@ export function MarketPage() {
                 return (
                   <Card key={option.id} className="space-y-4 p-4">
                     <div className="flex flex-col items-center gap-3 rounded-3xl border border-border bg-surfaceAlt/30 p-5 text-center">
-                      <div className="rounded-[1.5rem] p-[4px]" style={getProfileBorderStyle(option.id)}>
+                      <div className="rounded-[1.5rem] p-[4px]" style={getProfileBorderPreviewStyle(option.id)}>
                         <Avatar
                           name={profile.displayName}
                           src={profile.photoURL}
@@ -2814,6 +2870,22 @@ export function MarketPage() {
                     </Button>
                   </Card>
                 );
+              })}
+            </div>
+          </details>
+
+          <details open className="space-y-3 rounded-2xl border border-border bg-surfaceAlt/20 p-4">
+            <summary className="flex cursor-pointer list-none items-center justify-between"><h2 className="text-lg font-semibold">Profile Cards</h2><ChevronDown size={18} /></summary>
+            <p className="text-sm text-textMuted">Used on profiles, @ mention popups, and leaderboard cards.</p>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {PROFILE_CARD_OPTIONS.map((option) => {
+                const owned = (profile.ownedProfileCardIds ?? ["card-default"]).includes(option.id);
+                const equipped = profile.equippedProfileCardId === option.id;
+                return <Card key={option.id} className="space-y-3 p-4" style={{ background: option.background }}>
+                  <div><p className="font-semibold">{option.name}</p><p className="mt-1 text-xs text-textMuted">{option.description}</p></div>
+                  <div className="rounded-2xl border border-border/70 bg-black/10 p-3"><p className="font-semibold" style={getNameColorStyle(profile.equippedNameColorId)}>{profile.displayName}</p><p className="text-xs text-textMuted">@{profile.handle}</p></div>
+                  <Button className="w-full" variant={equipped ? "secondary" : "primary"} disabled={equipped} onClick={() => void buyProfileCard(option.id)}>{equipped ? "Equipped" : owned ? "Equip" : `Buy for ${option.price}`}</Button>
+                </Card>;
               })}
             </div>
           </details>
@@ -3320,12 +3392,8 @@ export function LeaderboardPage() {
           const metricValue = leaderboardTab === "level" ? leader.level : leaderboardTab === "gems" ? leader.gems : leaderboardTab === "followers" ? leader.followerCount : leader.postCount;
 
           return (
-            <div
-              key={leader.uid}
-              className="rounded-3xl p-px"
-              style={leader.equippedProfileBorderId && leader.equippedProfileBorderId !== "border-none" ? getProfileBorderStyle(leader.equippedProfileBorderId) : undefined}
-            >
-            <Card className="overflow-hidden border border-border p-0">
+            <div key={leader.uid} className="rounded-3xl">
+            <Card className="overflow-hidden border border-border p-0" style={{ background: getProfileCardStyle(leader.equippedProfileCardId).background }}>
               <div className="h-24 w-full" style={formatBannerStyle(leader)} />
               <div className="relative p-5">
                 <div className="absolute -top-8 left-5 flex h-16 w-16 items-center justify-center rounded-[1.75rem] border-4 border-canvas bg-canvas">
@@ -3333,6 +3401,7 @@ export function LeaderboardPage() {
                     name={leader.displayName}
                     src={leader.photoURL}
                     className="h-full w-full rounded-[1.2rem]"
+                    borderId={leader.equippedProfileBorderId}
                   />
                 </div>
                 <div className="flex items-start justify-between gap-4 pt-10">

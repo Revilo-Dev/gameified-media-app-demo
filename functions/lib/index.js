@@ -3,10 +3,45 @@ import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
+import { createHash } from "node:crypto";
 initializeApp();
 const db = getFirestore();
 const auth = getAuth();
 const storage = getStorage();
+function getRequesterIp(request) {
+    const forwardedFor = request.rawRequest.headers["x-forwarded-for"];
+    const forwardedIp = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor?.split(",")[0];
+    return (forwardedIp ?? request.rawRequest.socket?.remoteAddress ?? "").trim();
+}
+function ipHash(ip) {
+    return createHash("sha256").update(ip).digest("hex");
+}
+async function isRequesterIpBanned(request) {
+    const ip = getRequesterIp(request);
+    if (!ip)
+        return false;
+    return (await db.collection("bannedIps").doc(ipHash(ip)).get()).exists;
+}
+/** Lets the client block account entry before authentication. The IP itself is never returned. */
+export const checkIpBan = onCall(async (request) => ({ banned: await isRequesterIpBanned(request) }));
+/** Records the current authenticated user's IP so moderators can ban it with their account. */
+export const registerUserDeviceIp = onCall(async (request) => {
+    if (!request.auth?.uid)
+        throw new HttpsError("unauthenticated", "You must be signed in.");
+    const ip = getRequesterIp(request);
+    if (!ip)
+        return { banned: false };
+    const hashedIp = ipHash(ip);
+    if ((await db.collection("bannedIps").doc(hashedIp).get()).exists) {
+        return { banned: true };
+    }
+    await db.collection("userIpAddresses").doc(`${request.auth.uid}_${hashedIp}`).set({
+        userId: request.auth.uid,
+        ipHash: hashedIp,
+        lastSeenAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return { banned: false };
+});
 export const reserveHandle = onCall(async () => {
     return { ok: true };
 });
@@ -101,6 +136,19 @@ export const banUserAccount = onCall(async (request) => {
     if (targetUserId === request.auth.uid) {
         throw new HttpsError("failed-precondition", "Moderators cannot ban their own account.");
     }
+    const ipAddressesSnapshot = await db.collection("userIpAddresses").where("userId", "==", targetUserId).get();
+    const banBatch = db.batch();
+    ipAddressesSnapshot.docs.forEach((ipAddress) => {
+        const hashedIp = ipAddress.get("ipHash");
+        if (typeof hashedIp === "string" && hashedIp) {
+            banBatch.set(db.collection("bannedIps").doc(hashedIp), {
+                bannedAt: FieldValue.serverTimestamp(),
+                bannedUserId: targetUserId,
+            });
+        }
+        banBatch.delete(ipAddress.ref);
+    });
+    await banBatch.commit();
     await deletePostsByAuthor(targetUserId);
     await Promise.all([
         db.collection("users").doc(targetUserId).delete(),
@@ -135,6 +183,43 @@ export const banUserAccount = onCall(async (request) => {
             throw error;
         }
     }
+    return { ok: true };
+});
+export const removePostEmbed = onCall(async (request) => {
+    if (!request.auth?.uid) {
+        throw new HttpsError("unauthenticated", "You must be signed in.");
+    }
+    await assertModerator(request.auth.uid);
+    const postId = typeof request.data?.postId === "string" ? request.data.postId.trim() : "";
+    if (!postId) {
+        throw new HttpsError("invalid-argument", "A post ID is required.");
+    }
+    const postRef = db.collection("posts").doc(postId);
+    const postSnapshot = await postRef.get();
+    if (!postSnapshot.exists) {
+        throw new HttpsError("not-found", "Post not found.");
+    }
+    const storagePaths = new Set();
+    const imageStoragePaths = postSnapshot.get("imageStoragePaths");
+    if (Array.isArray(imageStoragePaths)) {
+        imageStoragePaths.forEach((path) => {
+            if (typeof path === "string" && path)
+                storagePaths.add(path);
+        });
+    }
+    const imageStoragePath = postSnapshot.get("imageStoragePath");
+    if (typeof imageStoragePath === "string" && imageStoragePath)
+        storagePaths.add(imageStoragePath);
+    await Promise.all([...storagePaths].map((storagePath) => deleteStoragePath(storagePath)));
+    await postRef.update({
+        imageURL: null,
+        imageStoragePath: null,
+        imageUrls: [],
+        imageStoragePaths: [],
+        gifURL: null,
+        poll: null,
+        updatedAt: FieldValue.serverTimestamp(),
+    });
     return { ok: true };
 });
 export const deletePostCascade = onCall(async (request) => {

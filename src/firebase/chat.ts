@@ -11,7 +11,10 @@ function normalizeDate(value: unknown) {
 
 function normalizeConversation(snapshot: { id: string; data: () => Record<string, unknown> }): Conversation {
   const data = snapshot.data();
-  return { id: snapshot.id, participantIds: Array.isArray(data.participantIds) ? data.participantIds.map(String) : [], title: String(data.title ?? "Conversation"), unreadCount: 0, lastMessage: String(data.lastMessage ?? ""), updatedAt: normalizeDate(data.updatedAt), lastSenderId: typeof data.lastSenderId === "string" ? data.lastSenderId : null };
+  const lastReadAtByUser = typeof data.lastReadAtByUser === "object" && data.lastReadAtByUser !== null
+    ? Object.fromEntries(Object.entries(data.lastReadAtByUser as Record<string, unknown>).map(([userId, value]) => [userId, normalizeDate(value)]))
+    : {};
+  return { id: snapshot.id, participantIds: Array.isArray(data.participantIds) ? data.participantIds.map(String) : [], title: String(data.title ?? "Conversation"), unreadCount: 0, lastMessage: String(data.lastMessage ?? ""), updatedAt: normalizeDate(data.updatedAt), lastSenderId: typeof data.lastSenderId === "string" ? data.lastSenderId : null, lastReadAtByUser };
 }
 
 function normalizeMessage(snapshot: { id: string; data: () => Record<string, unknown> }): Message {
@@ -41,9 +44,21 @@ export async function startConversation(senderId: string, recipientId: string, t
   const ref = doc(db, COLLECTIONS.conversations, id);
   const existing = await getDoc(ref);
   if (!existing.exists()) {
-    await setDoc(ref, { participantIds: [senderId, recipientId].sort(), title, lastMessage: "", lastSenderId: null, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    await setDoc(ref, { participantIds: [senderId, recipientId].sort(), title, lastMessage: "", lastSenderId: null, lastReadAtByUser: {}, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
   }
   return id;
+}
+
+export async function markConversationRead(conversationId: string, userId: string) {
+  await updateDoc(doc(db, COLLECTIONS.conversations, conversationId), {
+    [`lastReadAtByUser.${userId}`]: serverTimestamp(),
+  });
+}
+
+export function hasUnreadConversation(conversation: Conversation, userId: string) {
+  if (!conversation.lastSenderId || conversation.lastSenderId === userId) return false;
+  const lastReadAt = conversation.lastReadAtByUser?.[userId];
+  return !lastReadAt || new Date(conversation.updatedAt).getTime() > new Date(lastReadAt).getTime();
 }
 
 export async function sendDirectMessage(conversation: Conversation, senderId: string, body: string) {

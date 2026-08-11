@@ -6,6 +6,9 @@ export const functionNames = {
   claimArcadeReward: "claimArcadeReward",
   reserveHandle: "reserveHandle",
   banUserAccount: "banUserAccount",
+  removePostEmbed: "removePostEmbed",
+  checkIpBan: "checkIpBan",
+  registerUserDeviceIp: "registerUserDeviceIp",
   deletePostCascade: "deletePostCascade",
   resetAllGems: "resetAllGems",
   resetAllCrypto: "resetAllCrypto",
@@ -13,10 +16,25 @@ export const functionNames = {
   recordPostView: "recordPostView",
 } as const;
 
+export async function checkIpBan() {
+  const callable = httpsCallable<undefined, { banned: boolean }>(functions, functionNames.checkIpBan);
+  return (await callable()).data;
+}
+
+export async function registerUserDeviceIp() {
+  const callable = httpsCallable<undefined, { banned: boolean }>(functions, functionNames.registerUserDeviceIp);
+  return (await callable()).data;
+}
+
 export async function banUserAccount(targetUserId: string) {
   const callable = httpsCallable<{ targetUserId: string }, { ok: boolean }>(functions, functionNames.banUserAccount);
   const result = await callable({ targetUserId });
   return result.data;
+}
+
+export async function removePostEmbed(postId: string) {
+  const callable = httpsCallable<{ postId: string }, { ok: boolean }>(functions, functionNames.removePostEmbed);
+  return (await callable({ postId })).data;
 }
 
 export async function deletePostCascade(postId: string) {

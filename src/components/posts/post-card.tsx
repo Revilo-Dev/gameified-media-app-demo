@@ -444,7 +444,7 @@ export function PostCard({
               size="sm"
               disabled={submittingRottenTomato || hasThrownRottenTomato}
               className={`gap-2 ${hasThrownRottenTomato ? "text-red-500" : "text-textMuted hover:text-red-500"}`}
-              title={hasThrownRottenTomato ? "You already threw a rotten tomato" : currentUserProfile?.isPremium ? "Free with premium" : "Costs 25 gems"}
+              title={hasThrownRottenTomato ? "You already threw a rotten tomato" : currentUserProfile?.isPremium ? "Free with premium" : "Costs 100 gems"}
               onClick={() => void handleRottenTomato()}
             >
               <TomatoIcon className="h-4 w-4" />

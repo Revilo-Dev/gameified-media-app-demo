@@ -1,7 +1,7 @@
 import type { ProfileCardOption } from "@/types/models";
 
 export const PROFILE_CARD_OPTIONS: ProfileCardOption[] = [
-  { id: "card-default", name: "Default", price: 0, rarity: "common", description: "Uses the app's default accent colors.", background: "linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 65%, #ffffff 35%) 100%)", accent: "var(--accent)", text: "#ffffff", mutedText: "rgba(255,255,255,0.8)" },
+  { id: "card-default", name: "Default", price: 0, rarity: "common", description: "Uses the active site background and accent colors.", background: "linear-gradient(135deg, var(--background) 0%, var(--surface) 72%, color-mix(in srgb, var(--surface) 82%, var(--accent) 18%) 100%)", accent: "var(--accent)", text: "var(--text)", mutedText: "var(--text-muted)" },
   { id: "card-aurora", name: "Aurora Steel", price: 8000, rarity: "rare", description: "A cool cyan-blue panel with a polished finish.", background: "#122b3a", accent: "#67e8f9", text: "#ecfeff", mutedText: "#a5f3fc" },
   { id: "card-sunset", name: "Sunset Ember", price: 9500, rarity: "epic", description: "A warm coral panel with bold contrast.", background: "#3a1f24", accent: "#fb923c", text: "#fff7ed", mutedText: "#fed7aa" },
   { id: "card-verdant", name: "Verdant Circuit", price: 11000, rarity: "epic", description: "A deep green profile card with a crisp tech feel.", background: "#13281f", accent: "#4ade80", text: "#ecfdf5", mutedText: "#bbf7d0" },

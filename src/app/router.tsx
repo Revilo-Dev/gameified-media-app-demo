@@ -1,9 +1,19 @@
 import { Suspense, lazy } from "react";
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
+import { useAuth } from "@/app/auth-provider";
 
 function RouteFallback() {
   return <div className="p-6 text-sm text-textMuted">Loading page...</div>;
+}
+
+function BanGuard({ children }: { children: React.ReactNode }) {
+  const { isBanned, isBanStatusLoading, isTimedOut } = useAuth();
+  if (isBanStatusLoading) {
+    return <RouteFallback />;
+  }
+  if (isBanned) return <Navigate to="/banned" replace />;
+  return isTimedOut ? <Navigate to="/timed-out" replace /> : children;
 }
 
 function lazyElement<T extends Record<string, React.ComponentType>>(loader: () => Promise<T>, exportName: keyof T) {
@@ -22,19 +32,27 @@ function lazyElement<T extends Record<string, React.ComponentType>>(loader: () =
 export const router = createBrowserRouter([
   {
     path: "/login",
-    element: lazyElement(() => import("@/pages/simple-pages"), "LoginPage"),
+    element: <BanGuard>{lazyElement(() => import("@/pages/simple-pages"), "LoginPage")}</BanGuard>,
   },
   {
     path: "/signup",
-    element: lazyElement(() => import("@/pages/simple-pages"), "SignupPage"),
+    element: <BanGuard>{lazyElement(() => import("@/pages/simple-pages"), "SignupPage")}</BanGuard>,
   },
   {
     path: "/onboarding",
-    element: lazyElement(() => import("@/pages/simple-pages"), "OnboardingPage"),
+    element: <BanGuard>{lazyElement(() => import("@/pages/simple-pages"), "OnboardingPage")}</BanGuard>,
+  },
+  {
+    path: "/banned",
+    element: lazyElement(() => import("@/pages/simple-pages"), "BannedPage"),
+  },
+  {
+    path: "/timed-out",
+    element: lazyElement(() => import("@/pages/simple-pages"), "TimedOutPage"),
   },
   {
     path: "/",
-    element: <AppLayout />,
+    element: <BanGuard><AppLayout /></BanGuard>,
     errorElement: lazyElement(() => import("@/pages/simple-pages"), "NotFoundPage"),
     children: [
       { index: true, element: lazyElement(() => import("@/pages/home-page"), "HomePage") },

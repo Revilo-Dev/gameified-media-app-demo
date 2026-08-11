@@ -22,6 +22,7 @@ import { COLLECTIONS } from "@/firebase/firestore";
 import { createNotification } from "@/firebase/notifications";
 import { addXpToUser, subscribeToXpLeaderboard } from "@/firebase/users";
 import { deleteStorageObject } from "@/firebase/storage";
+import { removePostEmbed as removePostEmbedCallable } from "@/firebase/functions";
 import { readCache, writeCache } from "@/lib/persistent-cache";
 import type { Post, UserProfile } from "@/types/models";
 
@@ -326,7 +327,7 @@ export async function throwRottenTomato(postId: string, user: UserProfile) {
     }
 
     const isPremium = Boolean(userSnapshot.data().isPremium);
-    const tomatoCost = isPremium ? 0 : 25;
+    const tomatoCost = isPremium ? 0 : 100;
     usedPremiumFreebie = isPremium;
     const currentGems = Number(userSnapshot.data().gems ?? 0);
     if (currentGems < tomatoCost) {
@@ -362,7 +363,7 @@ export async function throwRottenTomato(postId: string, user: UserProfile) {
     await createNotification({
       type: "reaction",
       title: "A rotten tomato hit your post",
-      body: usedPremiumFreebie ? "A premium user threw a free rotten tomato at your post." : "Someone spent 25 gems to throw a rotten tomato at your post.",
+      body: usedPremiumFreebie ? "A premium user threw a free rotten tomato at your post." : "Someone spent 100 gems to throw a rotten tomato at your post.",
       actorId: null,
       userId: authorId,
       postId,
@@ -387,26 +388,7 @@ export async function createReply(input: CreatePostInput) {
 }
 
 export async function removePostEmbed(postId: string) {
-  const postRef = doc(db, COLLECTIONS.posts, postId);
-  const snapshot = await getDoc(postRef);
-
-  if (!snapshot.exists()) {
-    throw new Error("Post not found.");
-  }
-
-  const data = snapshot.data();
-  const imageStoragePaths = Array.isArray(data.imageStoragePaths)
-    ? data.imageStoragePaths.filter((value): value is string => typeof value === "string")
-    : [typeof data.imageStoragePath === "string" ? data.imageStoragePath : null].filter((value): value is string => Boolean(value));
-  await Promise.all(imageStoragePaths.map((storagePath) => deleteStorageObject(storagePath)));
-  await updateDoc(postRef, {
-    imageURL: null,
-    imageStoragePath: null,
-    imageUrls: [],
-    imageStoragePaths: [],
-    gifURL: null,
-    poll: null,
-  });
+  await removePostEmbedCallable(postId);
 }
 
 async function deletePostArtifacts(postId: string) {

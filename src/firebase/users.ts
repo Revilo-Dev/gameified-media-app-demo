@@ -7,7 +7,7 @@ import { createNotification } from "@/firebase/notifications";
 import { getLevelForXp } from "@/constants/gamification";
 import type { ActivityHistoryEntry, CryptoCoinId, ThemeMode, UserProfile } from "@/types/models";
 import { users as demoUsers } from "@/lib/demo-data";
-import { bannerPresets } from "@/lib/banner-presets";
+import { bannerPresets, defaultBannerColorIds } from "@/lib/banner-presets";
 import { readCache, writeCache } from "@/lib/persistent-cache";
 
 function buildHandle(displayName: string, uid: string) {
@@ -107,6 +107,7 @@ export async function ensureUserProfile(user: User) {
     equippedProfileBorderId: "border-none",
     ownedProfileCardIds: ["card-default"],
     equippedProfileCardId: "card-default",
+    ownedBannerColorIds: defaultBannerColorIds,
     displayPreferences: { disableProfileBorders: false, disableNameEffects: false },
     followerCount: 0,
     followingCount: 0,

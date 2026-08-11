@@ -40,6 +40,7 @@ import { users } from "@/lib/demo-data";
 import { readCache, writeCache } from "@/lib/persistent-cache";
 import { useUiStore } from "@/store/use-ui-store";
 import { sendBrowserAlert } from "@/lib/browser-alerts";
+import { hasUnreadConversation, subscribeToConversations } from "@/firebase/chat";
 import type { ActivityHistoryEntry, UserProfile } from "@/types/models";
 
 const navItems = [
@@ -83,6 +84,7 @@ export function AppLayout() {
   const [profile, setProfile] = useState<UserProfile>(users[0]);
   const [followCounts, setFollowCounts] = useState({ followers: users[0].followerCount, following: users[0].followingCount });
   const [notificationCount, setNotificationCount] = useState(0);
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0);
   const [claimedToday, setClaimedToday] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isModeratorPanelOpen, setIsModeratorPanelOpen] = useState(false);
@@ -133,6 +135,16 @@ export function AppLayout() {
         setProfile(nextProfile);
         writeCache(`cache:sidebar-profile:${user.uid}`, nextProfile);
       }
+    });
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setUnreadMessageCount(0);
+      return;
+    }
+    return subscribeToConversations(user.uid, (conversations) => {
+      setUnreadMessageCount(conversations.filter((conversation) => hasUnreadConversation(conversation, user.uid)).length);
     });
   }, [user]);
 
@@ -343,7 +355,7 @@ export function AppLayout() {
               }}
             >
               <Gem size={16} />
-              {claimedToday ? "Reward claimed — back in 12h" : `Redeem +${dailyGemReward} gems`}
+              {claimedToday ? "Reward claimed" : `Redeem +${dailyGemReward} gems`}
             </Button>
             <NavLink to="/premium" className="flex items-center gap-2 rounded-full bg-[color:var(--accent)] px-4 py-2 text-sm font-semibold text-white shadow-panel">
               <Crown size={16} /> Go Premium
@@ -449,7 +461,8 @@ export function AppLayout() {
                 className={({ isActive }) => `flex items-center gap-3 rounded-2xl px-4 py-3 text-sm ${isActive ? "bg-accent text-white" : "bg-surfaceAlt text-text"}`}
               >
                 <item.icon size={18} />
-                {item.label}
+                <span className="flex-1">{item.label}</span>
+                {item.label === "Chat" && unreadMessageCount ? <span className="rounded-full bg-[color:var(--error)] px-2 py-0.5 text-[10px] font-semibold text-white">{unreadMessageCount}</span> : null}
               </NavLink>
             ))}
           </Card>
@@ -496,10 +509,11 @@ export function AppLayout() {
               <NavLink
                 key={item.to}
                 to={item.to}
-                className={({ isActive }) => `flex flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-medium transition ${isActive ? "bg-[color:var(--accent)] text-white shadow-lg" : "text-textMuted"}`}
+                className={({ isActive }) => `relative flex flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-medium transition ${isActive ? "bg-[color:var(--accent)] text-white shadow-lg" : "text-textMuted"}`}
               >
                 <item.icon size={18} />
                 {item.label}
+                {item.label === "Chat" && unreadMessageCount ? <span className="absolute right-1 top-1 grid min-w-4 place-items-center rounded-full bg-[color:var(--error)] px-1 text-[9px] font-bold text-white">{unreadMessageCount}</span> : null}
               </NavLink>
             ))}
             <button

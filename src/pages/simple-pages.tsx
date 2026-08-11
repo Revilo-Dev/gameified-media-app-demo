@@ -6,8 +6,7 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { Bell, Check, ChevronDown, ChevronUp, CircleDollarSign, Clock3, Crown, Eye, EyeOff, Gem, Globe2, Hammer, ImagePlus, Lock, MapPin, MessageCircle, MoreHorizontal, Orbit, Palette, Search, Send, Sparkles, Star, Trash2, TriangleAlert, Unlock, UserPlus, Users, X, Zap } from "lucide-react";
-import { collection, deleteDoc, doc, getDocs, increment, query, updateDoc, where, writeBatch } from "firebase/firestore";
-import { auth, db } from "@/firebase/config";
+import { auth } from "@/firebase/config";
 import { Card } from "@/components/common/card";
 import { Button } from "@/components/common/button";
 import { XpProgress } from "@/components/gamification/xp-progress";
@@ -18,28 +17,27 @@ import { MinesGame } from "@/components/gamification/mines-game";
 import { WheelSpin } from "@/components/gamification/wheel-spin";
 import { ReactionTest } from "@/components/gamification/reaction-test";
 import { shopItems, users } from "@/lib/demo-data";
-import { bannerPresets } from "@/lib/banner-presets";
-import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/auth";
+import { bannerColorOptions, bannerPresets, defaultBannerColorIds } from "@/lib/banner-presets";
+import { logout, signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/firebase/auth";
 import { useAuth } from "@/app/auth-provider";
 import { addGemsToUser, addXpToUser, ensureUserProfile, executeCoinPurchase, executeCoinSale, getDemoUserByHandle, isHandleAvailable, recordActivity, subscribeToUserLeaderboard, subscribeToUserProfileByHandle, subscribeToUserProfileById, subscribeToUserProfiles, subscribeToXpLeaderboard, updateUserProfile } from "@/firebase/users";
 import { changeUserPassword, linkGoogleAccount, updateDisplayName, uploadProfileBanner, uploadProfilePicture } from "@/firebase/auth";
-import { deletePostCascade, subscribeToPosts, subscribeToPostsByAuthor } from "@/firebase/posts";
+import { subscribeToPosts, subscribeToPostsByAuthor } from "@/firebase/posts";
 import { InlineEntities } from "@/components/common/inline-entities";
 import { Avatar } from "@/components/common/avatar";
 import { setFollowingRelationship, subscribeToFollowerIds, subscribeToFollowCounts, subscribeToFollowRelationship, subscribeToFollowingIds } from "@/firebase/follows";
 import { useUiStore } from "@/store/use-ui-store";
-import { getXpProgress } from "@/constants/gamification";
-import { getNameColorStyle, getNameColorValue, NAME_COLOR_OPTIONS } from "@/constants/name-colors";
+import { getNameColorStyle, NAME_COLOR_OPTIONS } from "@/constants/name-colors";
 import { PROFILE_BORDER_OPTIONS, getProfileBorderStyle } from "@/constants/profile-borders";
 import { PROFILE_CARD_OPTIONS, getProfileCardStyle } from "@/constants/profile-cards";
 import { themePresets } from "@/lib/theme-presets";
-import { readCache, writeCache } from "@/lib/persistent-cache";
-import { banUserAccount, recordPostView, resetAllCrypto, resetAllGems } from "@/firebase/functions";
-import { sendDirectMessage, startConversation, subscribeToAllConversations, subscribeToConversationMessages, subscribeToConversations } from "@/firebase/chat";
+import { banUserAccount, checkIpBan, recordPostView, registerUserDeviceIp, resetAllCrypto, resetAllGems } from "@/firebase/functions";
+import { hasUnreadConversation, markConversationRead, sendDirectMessage, startConversation, subscribeToAllConversations, subscribeToConversationMessages, subscribeToConversations } from "@/firebase/chat";
 import { createInitialCryptoMarketState, moderateCryptoMarket, subscribeToCryptoMarket, type CryptoMarketState } from "@/firebase/crypto-market";
 import { subscribeToBookmarkedPosts } from "@/firebase/bookmarks";
 import { markAllNotificationsRead, markNotificationRead, subscribeToNotifications } from "@/firebase/notifications";
 import { TomatoIcon } from "@/components/common/tomato-icon";
+import { SectionNav } from "@/components/common/section-nav";
 import { UserBadges } from "@/components/common/user-badges";
 import { PostCard } from "@/components/posts/post-card";
 import { PostComposer } from "@/components/posts/post-composer";
@@ -114,6 +112,10 @@ function formatLastOnline(lastOnlineAt?: string) {
 function getTimeoutRemainingLabel(timeoutUntil?: string | null) {
   if (!timeoutUntil) {
     return null;
+  }
+
+  if (timeoutUntil === "forever") {
+    return "permanently";
   }
 
   const timeoutDate = new Date(timeoutUntil);
@@ -265,6 +267,7 @@ const DISPLAY_NAME_PATTERN = /^[A-Za-z0-9 ]+$/;
 const HANDLE_PATTERN = /^[a-z0-9_]+$/;
 const FREE_THEME_IDS: ThemeMode[] = ["graphite", "mist"];
 const EXPLORE_PAGE_SIZE = 50;
+const CRYPTO_SALE_XP_CAP = 100;
 const THEME_MARKET_PRICES: Record<ThemeMode, number> = {
   graphite: 0,
   mist: 0,
@@ -769,18 +772,6 @@ export function ProfilePage() {
     }
   }
 
-  async function deleteUserContentLocally(targetUserId: string) {
-    const postsSnapshot = await getDocs(query(collection(db, "posts"), where("authorId", "==", targetUserId)));
-    const batch = writeBatch(db);
-
-    postsSnapshot.docs.forEach((postDoc) => {
-      batch.delete(postDoc.ref);
-    });
-
-    batch.delete(doc(db, "users", targetUserId));
-    await batch.commit();
-  }
-
   function beginCoinHoldingEdit() {
     if (!user || !canEditModeratorValues) return;
     setCoinHoldingValues(Object.fromEntries(CRYPTO_COINS.map((coin) => [coin.id, String(user.coinHoldings?.[coin.id] ?? 0)])) as Record<CryptoCoinId, string>);
@@ -869,7 +860,7 @@ export function ProfilePage() {
 
   if (!user) {
     return (
-      <PageFrame title="Profile not found" subtitle="This profile is not available in the current demo dataset.">
+      <PageFrame title="Profile not found" subtitle="This profile is unavailable.">
         <Card className="p-6 text-sm text-textMuted">We could not find a profile for @{handle ?? "unknown"}.</Card>
       </PageFrame>
     );
@@ -1034,36 +1025,17 @@ export function ProfilePage() {
       </Card>
 
       <section className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setProfileTab("posts")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${profileTab === "posts" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
-          >
-            Posts {userPosts.length}
-          </button>
-          <button
-            type="button"
-            onClick={() => setProfileTab("replies")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${profileTab === "replies" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
-          >
-            Replies {userReplies.length}
-          </button>
-          <button
-            type="button"
-            onClick={() => setProfileTab("stats")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${profileTab === "stats" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
-          >
-            Profile
-          </button>
-          <button
-            type="button"
-            onClick={() => setProfileTab("inventory")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${profileTab === "inventory" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
-          >
-            Inventory
-          </button>
-        </div>
+        <SectionNav
+          ariaLabel="Profile sections"
+          activeId={profileTab}
+          onChange={setProfileTab}
+          items={[
+            { id: "posts", label: `Posts ${userPosts.length}` },
+            { id: "replies", label: `Replies ${userReplies.length}` },
+            { id: "stats", label: "Profile" },
+            { id: "inventory", label: "Inventory" },
+          ] as const}
+        />
         {!canViewPosts ? (
           <Card className="space-y-2 p-6 text-sm text-textMuted">
             <p className="inline-flex items-center gap-2 font-semibold text-text"><Lock size={16} /> Private profile</p>
@@ -1572,18 +1544,19 @@ function EditProfileModal({
                     <p className="text-sm font-semibold">Banner</p>
                   </div>
                   <div className="flex flex-wrap gap-3">
-                    {bannerPresets.slice(0, 5).map((preset) => (
+                    {bannerColorOptions.filter((option) => (profile.ownedBannerColorIds ?? defaultBannerColorIds).includes(option.id)).map((option) => (
                       <button
-                        key={preset}
+                        key={option.id}
                         type="button"
-                        onClick={() => setBannerColor(preset)}
-                        className={`h-12 w-16 rounded-2xl border transition ${bannerColor === preset ? "border-accent ring-2 ring-[color:var(--accent)]/30" : "border-border"}`}
-                        style={{ background: preset }}
+                        onClick={() => setBannerColor(option.value)}
+                        className={`h-12 w-16 rounded-2xl border transition ${bannerColor === option.value ? "border-accent ring-2 ring-[color:var(--accent)]/30" : "border-border"}`}
+                        style={{ background: option.value }}
+                        title={option.name}
                       />
                     ))}
                   </div>
                   <p className="text-xs text-textMuted">
-                    {profile.isPremium ? "Premium users can keep a color banner or upload a banner image." : "Choose one of five banner colors. Banner image upload is premium-only."}
+                    {profile.isPremium ? "Premium users can keep a color banner or upload a banner image." : "Choose your unlocked banner colors. More colors are available in the market; banner image upload is premium-only."}
                   </p>
                   {profile.isPremium ? (
                     <input
@@ -1790,7 +1763,7 @@ function ModeratorBanButton({ targetUserId }: { targetUserId: string }) {
       className="h-9 px-3 text-red-500"
       disabled={isBanning}
       onClick={async () => {
-        const confirmed = window.confirm("Ban this user? This removes their account, posts, and replies.");
+        const confirmed = window.confirm("Ban this user? This removes their account, posts, replies, and blocks their recorded IP address.");
         if (!confirmed) {
           return;
         }
@@ -1798,18 +1771,11 @@ function ModeratorBanButton({ targetUserId }: { targetUserId: string }) {
         setIsBanning(true);
         try {
           await banUserAccount(targetUserId);
-          toast.success("User banned", { description: "The account and authored content were removed." });
+          toast.success("User banned", { description: "The account, authored content, and recorded IP address were blocked." });
           navigate("/");
         } catch (error) {
           console.error("Failed to ban user", error);
-          try {
-            await deleteUserContentLocally(targetUserId);
-            toast.success("User banned", { description: "Firestore content removed locally." });
-            navigate("/");
-          } catch (fallbackError) {
-            console.error("Local ban fallback failed", fallbackError);
-            toast.error(getFirebaseErrorMessage(fallbackError));
-          }
+          toast.error("Unable to ban user", { description: getFirebaseErrorMessage(error) });
         } finally {
           setIsBanning(false);
         }
@@ -1822,6 +1788,7 @@ function ModeratorBanButton({ targetUserId }: { targetUserId: string }) {
 
 const MODERATOR_TIMEOUT_OPTIONS = [
   { label: "Remove timeout", durationMs: null },
+  { label: "Forever", durationMs: "forever" },
   { label: "1h", durationMs: 60 * 60 * 1000 },
   { label: "3h", durationMs: 3 * 60 * 60 * 1000 },
   { label: "6h", durationMs: 6 * 60 * 60 * 1000 },
@@ -1862,10 +1829,10 @@ function ModeratorTimeoutButton({ targetUserId }: { targetUserId: string }) {
         setIsUpdating(true);
         try {
           await updateUserProfile(targetUserId, {
-            timeoutUntil: selected.durationMs === null ? null : new Date(Date.now() + selected.durationMs).toISOString(),
+            timeoutUntil: selected.durationMs === null ? null : selected.durationMs === "forever" ? "forever" : new Date(Date.now() + selected.durationMs).toISOString(),
           });
-          toast.success(selected.durationMs === null ? "Timeout removed" : "User timed out", {
-            description: selected.durationMs === null ? "The user can post again." : `${selected.label} applied.`,
+          toast.success(selected.durationMs === null ? "Timeout removed" : selected.durationMs === "forever" ? "User timed out forever" : "User timed out", {
+            description: selected.durationMs === null ? "The user can post again." : selected.durationMs === "forever" ? "Permanent timeout applied." : `${selected.label} applied.`,
           });
         } catch (error) {
           console.error("Failed to time out user", error);
@@ -1966,7 +1933,16 @@ export function LoginPage() {
         className="space-y-5"
         onSubmit={form.handleSubmit(async (values) => {
           try {
+            if ((await checkIpBan()).banned) {
+              navigate("/banned", { replace: true });
+              return;
+            }
             const credential = await signInWithEmail(values.email, values.password);
+            if ((await registerUserDeviceIp()).banned) {
+              await logout();
+              navigate("/banned", { replace: true });
+              return;
+            }
             await ensureUserProfile(credential.user);
             toast.success("Signed in");
             navigate("/");
@@ -2006,7 +1982,16 @@ export function LoginPage() {
             className="w-full"
             onClick={async () => {
               try {
+                if ((await checkIpBan()).banned) {
+                  navigate("/banned", { replace: true });
+                  return;
+                }
                 const credential = await signInWithGoogle();
+                if ((await registerUserDeviceIp()).banned) {
+                  await logout();
+                  navigate("/banned", { replace: true });
+                  return;
+                }
                 await ensureUserProfile(credential.user);
                 toast.success("Signed in with Google");
                 navigate("/");
@@ -2050,6 +2035,10 @@ export function SignupPage() {
         className="space-y-5"
         onSubmit={form.handleSubmit(async (values) => {
           try {
+            if ((await checkIpBan()).banned) {
+              navigate("/banned", { replace: true });
+              return;
+            }
             await signUpWithEmail(values.email.trim(), values.password, values.displayName.trim());
             toast.success("Check your email", { description: "Verify your email address, then sign in to finish creating your account." });
             navigate("/login");
@@ -2094,7 +2083,16 @@ export function SignupPage() {
             className="w-full"
             onClick={async () => {
               try {
+                if ((await checkIpBan()).banned) {
+                  navigate("/banned", { replace: true });
+                  return;
+                }
                 const credential = await signInWithGoogle();
+                if ((await registerUserDeviceIp()).banned) {
+                  await logout();
+                  navigate("/banned", { replace: true });
+                  return;
+                }
                 await ensureUserProfile(credential.user);
                 toast.success("Signed in with Google");
                 navigate("/");
@@ -2114,6 +2112,45 @@ export function SignupPage() {
         </p>
       </form>
     </AuthShell>
+  );
+}
+
+export function BannedPage() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-bg px-4 py-10">
+      <Card className="w-full max-w-lg space-y-4 p-8 text-center shadow-xl">
+        <TriangleAlert className="mx-auto h-12 w-12 text-red-500" />
+        <h1 className="text-2xl font-bold">You have been banned of Nebula Social</h1>
+        <p className="text-sm text-textMuted">Access from this device has been blocked. If you believe this is a mistake, contact Nebula Social support.</p>
+      </Card>
+    </div>
+  );
+}
+
+export function TimedOutPage() {
+  const { timeoutUntil } = useAuth();
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    if (!timeoutUntil || timeoutUntil === "forever") return;
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [timeoutUntil]);
+
+  const remaining = timeoutUntil && timeoutUntil !== "forever" && new Date(timeoutUntil).getTime() > now
+    ? getTimeoutRemainingLabel(timeoutUntil) ?? "less than a minute"
+    : "no time — your timeout has expired.";
+  const expiry = timeoutUntil && timeoutUntil !== "forever" ? new Date(timeoutUntil) : null;
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-bg px-4 py-10">
+      <Card className="w-full max-w-lg space-y-4 p-8 text-center shadow-xl">
+        <Clock3 className="mx-auto h-12 w-12 text-amber-400" />
+        <h1 className="text-2xl font-bold">You have been timed out</h1>
+        <p className="text-sm text-textMuted">{timeoutUntil === "forever" ? "This timeout is permanent." : `Your timeout expires in ${remaining}`}</p>
+        {expiry ? <p className="text-xs text-textMuted">Expires on {expiry.toLocaleString()}</p> : null}
+      </Card>
+    </div>
   );
 }
 
@@ -2316,6 +2353,7 @@ export function ChatPage() {
   const profilesById = useMemo(() => new Map(profiles.map((item) => [item.uid, item])), [profiles]);
   const mutualProfiles = useMemo(() => profiles.filter((item) => followingIds.includes(item.uid) && followerIds.includes(item.uid)), [followerIds, followingIds, profiles]);
   const isModerator = Boolean(profile?.isModerator);
+  const unreadMessageCount = useMemo(() => user ? conversations.filter((conversation) => hasUnreadConversation(conversation, user.uid)).length : 0, [conversations, user]);
 
   useEffect(() => {
     if (!user) {
@@ -2381,6 +2419,11 @@ export function ChatPage() {
     });
   }, [activeConversation?.id, user]);
 
+  useEffect(() => {
+    if (!user || !activeConversation || inspectedConversationId || !hasUnreadConversation(activeConversation, user.uid)) return;
+    void markConversationRead(activeConversation.id, user.uid).catch((error) => console.error("Failed to mark conversation read", error));
+  }, [activeConversation, inspectedConversationId, user]);
+
   const sendMessage = async () => {
     if (!user || !activeConversation || !draft.trim()) {
       return;
@@ -2406,6 +2449,8 @@ export function ChatPage() {
   return (
     <PageFrame title="Messages" subtitle="Chat privately with people you both follow.">
       {!user ? <Card className="p-6 text-sm text-textMuted">Sign in to use direct messages.</Card> : (
+      <div className="space-y-4">
+        {unreadMessageCount ? <div className="inline-flex items-center gap-2 rounded-full bg-[color:var(--error)]/15 px-3 py-1 text-xs font-semibold text-[color:var(--error)]">{unreadMessageCount} unread message{unreadMessageCount === 1 ? "" : "s"}</div> : null}
       <Card className="flex min-h-[620px] flex-col overflow-hidden p-0">
           <div className="flex items-center gap-3 overflow-x-auto border-b border-border p-4">
             {mutualProfiles.map((contact) => <button key={contact.uid} type="button" disabled={isStartingChat} title={`Chat with ${contact.displayName}`} onClick={() => void beginChat(contact)} className="group shrink-0"><Avatar name={contact.displayName} src={contact.photoURL} className="h-11 w-11 rounded-xl transition group-hover:ring-2 group-hover:ring-[color:var(--accent)]" /></button>)}
@@ -2448,6 +2493,7 @@ export function ChatPage() {
             </Button>
           </div>
       </Card>
+      </div>
       )}
     </PageFrame>
   );
@@ -2698,7 +2744,7 @@ export function ArcadePage() {
   return (
     <PageFrame title="Arcade" subtitle="Wager games and quick challenges.">
       <div className="space-y-5">
-        <div className="flex flex-wrap gap-2">{([ ["slots", "Slots"], ["mines", "Mines"], ["coin", "Coin Toss"], ["dice", "Dice"], ["wheel", "Wheel Spin"], ["reaction", "Reaction Test"] ] as const).map(([id, label]) => <button key={id} type="button" onClick={() => setArcadeTab(id)} className={`rounded-full px-4 py-2 text-sm font-semibold transition ${arcadeTab === id ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}>{label}</button>)}</div>
+        <SectionNav ariaLabel="Arcade games" activeId={arcadeTab} onChange={setArcadeTab} items={[ { id: "slots", label: "Slots" }, { id: "mines", label: "Mines" }, { id: "coin", label: "Coin Toss" }, { id: "dice", label: "Dice" }, { id: "wheel", label: "Wheel Spin" }, { id: "reaction", label: "Reaction Test" } ] as const} />
         {arcadeTab === "slots" ? <SlotMachine /> : arcadeTab === "mines" ? <MinesGame /> : arcadeTab === "coin" ? <CoinToss /> : arcadeTab === "dice" ? <DiceGame /> : arcadeTab === "wheel" ? <WheelSpin /> : <ReactionTest />}
       </div>
     </PageFrame>
@@ -2709,6 +2755,7 @@ export function MarketPage() {
   const { user } = useAuth();
   const { setTheme } = useUiStore();
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [marketSection, setMarketSection] = useState<"nameplates" | "borders" | "banners" | "cards" | "themes">("nameplates");
   const themeOptions = Object.entries(themePresets).map(([id, definition]) => ({
     id: id as ThemeMode,
     ...definition,
@@ -2837,6 +2884,29 @@ export function MarketPage() {
     toast.success(`${option.name} purchased and equipped`);
   }
 
+  async function buyBannerColor(bannerId: string) {
+    if (!user || !profile) return;
+    const option = bannerColorOptions.find((item) => item.id === bannerId);
+    if (!option) return;
+    const ownedIds = profile.ownedBannerColorIds ?? defaultBannerColorIds;
+    if (ownedIds.includes(bannerId)) {
+      await updateUserProfile(user.uid, { bannerColor: option.value });
+      toast.success(`${option.name} equipped`);
+      return;
+    }
+    if (profile.gems < option.price) {
+      toast.error("Not enough gems for that banner color.");
+      return;
+    }
+    await addGemsToUser(user.uid, -option.price);
+    await updateUserProfile(user.uid, {
+      ownedBannerColorIds: [...new Set([...ownedIds, bannerId])],
+      bannerColor: option.value,
+    });
+    await recordActivity(user.uid, "purchase", option.name, `Purchased banner color for ${formatAmount(option.price)} gems`, option.price);
+    toast.success(`${option.name} purchased and equipped`);
+  }
+
   return (
     <PageFrame title="Market" subtitle="Spend gems on profile cosmetics, animated nameplates, borders, and a deeper theme catalog.">
       {!user || !profile ? (
@@ -2865,7 +2935,17 @@ export function MarketPage() {
             </div>
           </Card>
 
-          <details open className="space-y-3 rounded-2xl border border-border bg-surfaceAlt/20 p-4">
+          <SectionNav
+            ariaLabel="Market categories"
+            activeId={marketSection}
+            onChange={(section) => {
+              setMarketSection(section);
+              document.getElementById(`market-${section}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+            items={[ { id: "nameplates", label: "Nameplates" }, { id: "borders", label: "Borders" }, { id: "banners", label: "Banners" }, { id: "cards", label: "Cards" }, { id: "themes", label: "Themes" } ] as const}
+          />
+
+          <details id="market-nameplates" open className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-surfaceAlt/20 p-4">
             <summary className="flex cursor-pointer list-none items-center justify-between"><h2 className="text-lg font-semibold">Nameplates</h2><ChevronDown size={18} /></summary>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {NAME_COLOR_OPTIONS.map((option) => {
@@ -2895,7 +2975,7 @@ export function MarketPage() {
           </div>
           </details>
 
-          <details open className="space-y-3 rounded-2xl border border-border bg-surfaceAlt/20 p-4">
+          <details id="market-borders" open className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-surfaceAlt/20 p-4">
             <summary className="flex cursor-pointer list-none items-center justify-between"><h2 className="text-lg font-semibold">Profile Borders</h2><ChevronDown size={18} /></summary>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {PROFILE_BORDER_OPTIONS.map((option) => {
@@ -2927,7 +3007,23 @@ export function MarketPage() {
             </div>
           </details>
 
-          <details open className="space-y-3 rounded-2xl border border-border bg-surfaceAlt/20 p-4">
+          <details id="market-banners" open className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-surfaceAlt/20 p-4">
+            <summary className="flex cursor-pointer list-none items-center justify-between"><h2 className="text-lg font-semibold">Banner Colors</h2><ChevronDown size={18} /></summary>
+            <p className="text-sm text-textMuted">Choose from 20 premium banner colors plus five free starter colors.</p>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {bannerColorOptions.map((option) => {
+                const owned = (profile.ownedBannerColorIds ?? defaultBannerColorIds).includes(option.id);
+                const equipped = profile.bannerColor === option.value;
+                return <Card key={option.id} className="space-y-3 p-4">
+                  <div className="h-20 rounded-2xl border border-border" style={{ background: option.value }} />
+                  <p className="font-semibold">{option.name}</p>
+                  <Button className="w-full" variant={equipped ? "secondary" : "primary"} disabled={equipped} onClick={() => void buyBannerColor(option.id)}>{equipped ? "Equipped" : owned ? "Equip" : `Buy for ${option.price}`}</Button>
+                </Card>;
+              })}
+            </div>
+          </details>
+
+          <details id="market-cards" open className="scroll-mt-20 space-y-3 rounded-2xl border border-border bg-surfaceAlt/20 p-4">
             <summary className="flex cursor-pointer list-none items-center justify-between"><h2 className="text-lg font-semibold">Profile Cards</h2><ChevronDown size={18} /></summary>
             <p className="text-sm text-textMuted">Used on profiles, @ mention popups, and leaderboard cards.</p>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -2943,7 +3039,7 @@ export function MarketPage() {
             </div>
           </details>
 
-          <div className="space-y-3">
+          <div id="market-themes" className="scroll-mt-20 space-y-3">
             <div>
               <h2 className="text-lg font-semibold">Themes</h2>
             </div>
@@ -3072,7 +3168,8 @@ export function CryptoPage() {
     try {
       const result = await executeCoinSale(user.uid, coinId, coinAmount);
       if (result.profit > 0) {
-        await addXpToUser(user.uid, Math.max(5, Math.floor(result.profit / 4)));
+        const xpReward = Math.min(CRYPTO_SALE_XP_CAP, Math.max(2, Math.floor(result.profit / 25)));
+        await addXpToUser(user.uid, xpReward);
       }
       toast.success("Sale confirmed", { description: `+${result.gemValue.toFixed(2)} gems from ${CRYPTO_COINS.find((coin) => coin.id === coinId)?.name}` });
     } catch (error) {

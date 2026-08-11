@@ -76,6 +76,7 @@ export interface UserProfile {
   equippedProfileBorderId: string | null;
   ownedProfileCardIds?: string[];
   equippedProfileCardId?: string | null;
+  ownedBannerColorIds?: string[];
   displayPreferences?: {
     disableProfileBorders: boolean;
     disableNameEffects: boolean;
@@ -152,6 +153,7 @@ export interface Conversation {
   lastMessage: string;
   updatedAt: string;
   lastSenderId?: string | null;
+  lastReadAtByUser?: Record<string, string>;
 }
 
 export interface ActivityHistoryEntry {

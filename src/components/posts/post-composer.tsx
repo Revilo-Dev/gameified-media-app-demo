@@ -117,8 +117,9 @@ export function PostComposer({
   const contentField = form.register("content");
 
   const content = form.watch("content");
-  const timeoutUntil = profile?.timeoutUntil ? new Date(profile.timeoutUntil) : null;
-  const isTimedOut = Boolean(timeoutUntil && !Number.isNaN(timeoutUntil.getTime()) && timeoutUntil.getTime() > Date.now());
+  const isForeverTimedOut = profile?.timeoutUntil === "forever";
+  const timeoutUntil = profile?.timeoutUntil && !isForeverTimedOut ? new Date(profile.timeoutUntil) : null;
+  const isTimedOut = isForeverTimedOut || Boolean(timeoutUntil && !Number.isNaN(timeoutUntil.getTime()) && timeoutUntil.getTime() > Date.now());
   const attachmentLabel = useMemo(() => {
     if (pendingImages.length) {
       return `${pendingImages.length} image${pendingImages.length === 1 ? "" : "s"} attached`;
@@ -229,7 +230,7 @@ export function PostComposer({
     }
 
     if (isTimedOut) {
-      toast.error(`You are timed out until ${timeoutUntil?.toLocaleString()}.`);
+      toast.error(isForeverTimedOut ? "You have been timed out permanently." : `You are timed out until ${timeoutUntil?.toLocaleString()}.`);
       return;
     }
 
@@ -491,7 +492,7 @@ export function PostComposer({
                 </div>
               </div>
             </div>
-            {isTimedOut ? <p className="mt-2 text-xs text-red-300">Posting is disabled until {timeoutUntil?.toLocaleString()}.</p> : null}
+            {isTimedOut ? <p className="mt-2 text-xs text-red-300">{isForeverTimedOut ? "Posting is permanently disabled." : `Posting is disabled until ${timeoutUntil?.toLocaleString()}.`}</p> : null}
           </div>
         </div>
 

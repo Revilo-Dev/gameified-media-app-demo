@@ -213,6 +213,10 @@ export interface ProfileCardOption {
   description: string;
   background: string;
   accent: string;
+  text: string;
+  mutedText?: string;
+  animated?: boolean;
+  effect?: "glow" | "pulse" | "spin";
 }
 
 export interface TriviaQuestion {

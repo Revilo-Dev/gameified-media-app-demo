@@ -43,10 +43,10 @@ function MentionEntity({
         {value}
       </button>
       {open && profile ? (
-        <button type="button" onClick={() => navigate(`/profile/${handle}`)} className="absolute left-0 top-6 z-20 min-w-52 rounded-2xl border border-border p-3 text-left shadow-panel hover:brightness-110" style={{ background: getProfileCardStyle(profile.equippedProfileCardId).background }}>
-          <span className="block text-sm font-semibold text-text">{profile.displayName}</span>
-          <span className="block text-xs text-textMuted">@{profile.handle}</span>
-          <span className="mt-2 block text-xs text-textMuted">{profile.bio}</span>
+        <button type="button" onClick={() => navigate(`/profile/${handle}`)} className="absolute left-0 top-6 z-20 min-w-52 rounded-2xl border border-border p-3 text-left shadow-panel hover:brightness-110" style={{ background: getProfileCardStyle(profile.equippedProfileCardId).background, color: getProfileCardStyle(profile.equippedProfileCardId).text }}>
+          <span className="block text-sm font-semibold">{profile.displayName}</span>
+          <span className="block text-xs" style={{ color: getProfileCardStyle(profile.equippedProfileCardId).mutedText }}>{`@${profile.handle}`}</span>
+          <span className="mt-2 block text-xs" style={{ color: getProfileCardStyle(profile.equippedProfileCardId).mutedText }}>{profile.bio}</span>
         </button>
       ) : null}
     </span>

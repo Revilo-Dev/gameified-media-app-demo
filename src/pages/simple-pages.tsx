@@ -5,8 +5,8 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Bell, Check, ChevronDown, ChevronUp, CircleDollarSign, Clock3, Crown, Eye, EyeOff, Gem, Globe2, Hammer, ImagePlus, Lock, MapPin, MessageCircle, Orbit, Palette, Search, Send, Sparkles, Star, Trash2, TriangleAlert, Unlock, UserPlus, Users, X, Zap } from "lucide-react";
-import { deleteDoc, doc, increment, updateDoc } from "firebase/firestore";
+import { Bell, Check, ChevronDown, ChevronUp, CircleDollarSign, Clock3, Crown, Eye, EyeOff, Gem, Globe2, Hammer, ImagePlus, Lock, MapPin, MessageCircle, MoreHorizontal, Orbit, Palette, Search, Send, Sparkles, Star, Trash2, TriangleAlert, Unlock, UserPlus, Users, X, Zap } from "lucide-react";
+import { collection, deleteDoc, doc, getDocs, increment, query, updateDoc, where, writeBatch } from "firebase/firestore";
 import { auth, db } from "@/firebase/config";
 import { Card } from "@/components/common/card";
 import { Button } from "@/components/common/button";
@@ -30,7 +30,7 @@ import { setFollowingRelationship, subscribeToFollowerIds, subscribeToFollowCoun
 import { useUiStore } from "@/store/use-ui-store";
 import { getXpProgress } from "@/constants/gamification";
 import { getNameColorStyle, getNameColorValue, NAME_COLOR_OPTIONS } from "@/constants/name-colors";
-import { PROFILE_BORDER_OPTIONS, getProfileBorderPreviewStyle } from "@/constants/profile-borders";
+import { PROFILE_BORDER_OPTIONS, getProfileBorderStyle } from "@/constants/profile-borders";
 import { PROFILE_CARD_OPTIONS, getProfileCardStyle } from "@/constants/profile-cards";
 import { themePresets } from "@/lib/theme-presets";
 import { readCache, writeCache } from "@/lib/persistent-cache";
@@ -563,12 +563,14 @@ export function ProfilePage() {
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [followProfiles, setFollowProfiles] = useState<Record<string, UserProfile | null>>({});
   const [market, setMarket] = useState<CryptoMarketState>(() => createInitialCryptoMarketState());
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [editingModeratorValue, setEditingModeratorValue] = useState<"level" | "gems" | null>(null);
   const [moderatorValue, setModeratorValue] = useState("");
   const [isSavingModeratorValue, setIsSavingModeratorValue] = useState(false);
   const [isEditingCoinHoldings, setIsEditingCoinHoldings] = useState(false);
   const [coinHoldingValues, setCoinHoldingValues] = useState<Partial<Record<CryptoCoinId, string>>>({});
   const [isSavingStats, setIsSavingStats] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!authUser) {
@@ -708,6 +710,21 @@ export function ProfilePage() {
     };
   }, [visibleFollowIds]);
 
+  useEffect(() => {
+    if (!isProfileMenuOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!profileMenuRef.current?.contains(event.target as Node)) {
+        setIsProfileMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [isProfileMenuOpen]);
+
   const visibleFollowProfiles = useMemo(
     () => visibleFollowIds.map((profileId) => followProfiles[profileId]).filter((profile): profile is UserProfile => Boolean(profile)),
     [followProfiles, visibleFollowIds],
@@ -741,7 +758,7 @@ export function ProfilePage() {
 
     setIsSavingModeratorValue(true);
     try {
-      await updateUserProfile(user.uid, field === "level" ? { level: value } : { gems: value });
+      await updateUserProfile(user.uid, field === "level" ? { level: value, xp: 0 } : { gems: value });
       setEditingModeratorValue(null);
       toast.success(`${field === "level" ? "Level" : "Gems"} updated`);
     } catch (error) {
@@ -750,6 +767,18 @@ export function ProfilePage() {
     } finally {
       setIsSavingModeratorValue(false);
     }
+  }
+
+  async function deleteUserContentLocally(targetUserId: string) {
+    const postsSnapshot = await getDocs(query(collection(db, "posts"), where("authorId", "==", targetUserId)));
+    const batch = writeBatch(db);
+
+    postsSnapshot.docs.forEach((postDoc) => {
+      batch.delete(postDoc.ref);
+    });
+
+    batch.delete(doc(db, "users", targetUserId));
+    await batch.commit();
   }
 
   function beginCoinHoldingEdit() {
@@ -892,8 +921,26 @@ export function ProfilePage() {
                     >
                       {isOwnProfile ? "Edit profile" : isTogglingFollow ? "Saving..." : isFollowing ? "Following" : "Follow"}
                     </Button>
-                    {currentUserId && !isOwnProfile ? <ModeratorTimeoutButton targetUserId={user.uid} /> : null}
-                    {currentUserId && !isOwnProfile ? <ModeratorBanButton targetUserId={user.uid} /> : null}
+                    {currentUserId && !isOwnProfile ? (
+                      <div ref={profileMenuRef} className="relative">
+                        <Button type="button" variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => setIsProfileMenuOpen((current) => !current)}>
+                          <MoreHorizontal size={16} />
+                        </Button>
+                        {isProfileMenuOpen ? (
+                          <div className="absolute right-0 top-11 z-20 w-56 rounded-2xl border border-border bg-canvas p-2 shadow-panel">
+                            <div className="px-3 py-2">
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-textMuted">Moderation</p>
+                            </div>
+                            <div className="px-3 pb-2">
+                              <ModeratorTimeoutButton targetUserId={user.uid} />
+                            </div>
+                            <div className="px-3 pb-2">
+                              <ModeratorBanButton targetUserId={user.uid} />
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-textMuted">
@@ -1124,7 +1171,7 @@ export function ProfilePage() {
                         <p className="mt-1 text-xs text-textMuted">{option.description}</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <div className="h-10 w-10 shrink-0 rounded-2xl p-[3px]" style={getProfileBorderPreviewStyle(option.id)}>
+                        <div className="h-10 w-10 shrink-0 rounded-2xl p-[3px]" style={getProfileBorderStyle(option.id)}>
                           <div className="h-full w-full rounded-[13px] bg-canvas" />
                         </div>
                         {canModerateInventory && option.id !== "border-none" ? (
@@ -1755,7 +1802,14 @@ function ModeratorBanButton({ targetUserId }: { targetUserId: string }) {
           navigate("/");
         } catch (error) {
           console.error("Failed to ban user", error);
-          toast.error(getFirebaseErrorMessage(error));
+          try {
+            await deleteUserContentLocally(targetUserId);
+            toast.success("User banned", { description: "Firestore content removed locally." });
+            navigate("/");
+          } catch (fallbackError) {
+            console.error("Local ban fallback failed", fallbackError);
+            toast.error(getFirebaseErrorMessage(fallbackError));
+          }
         } finally {
           setIsBanning(false);
         }
@@ -2851,13 +2905,12 @@ export function MarketPage() {
                 return (
                   <Card key={option.id} className="space-y-4 p-4">
                     <div className="flex flex-col items-center gap-3 rounded-3xl border border-border bg-surfaceAlt/30 p-5 text-center">
-                      <div className="rounded-[1.5rem] p-[4px]" style={getProfileBorderPreviewStyle(option.id)}>
-                        <Avatar
-                          name={profile.displayName}
-                          src={profile.photoURL}
-                          className="h-20 w-20 rounded-[1.25rem]"
-                        />
-                      </div>
+                      <Avatar
+                        name={profile.displayName}
+                        src={profile.photoURL}
+                        className="h-20 w-20 rounded-[1.25rem]"
+                        borderId={option.id}
+                      />
                       <p className="font-semibold">{option.name}</p>
                     </div>
                     <Button
@@ -2881,9 +2934,9 @@ export function MarketPage() {
               {PROFILE_CARD_OPTIONS.map((option) => {
                 const owned = (profile.ownedProfileCardIds ?? ["card-default"]).includes(option.id);
                 const equipped = profile.equippedProfileCardId === option.id;
-                return <Card key={option.id} className="space-y-3 p-4" style={{ background: option.background }}>
-                  <div><p className="font-semibold">{option.name}</p><p className="mt-1 text-xs text-textMuted">{option.description}</p></div>
-                  <div className="rounded-2xl border border-border/70 bg-black/10 p-3"><p className="font-semibold" style={getNameColorStyle(profile.equippedNameColorId)}>{profile.displayName}</p><p className="text-xs text-textMuted">@{profile.handle}</p></div>
+                return <Card key={option.id} className="space-y-3 p-4" style={{ background: option.background, color: option.text }}>
+                  <div><p className="font-semibold">{option.name}</p><p className="mt-1 text-xs" style={{ color: option.mutedText ?? option.text }}>{option.description}</p></div>
+                  <div className="rounded-2xl border border-border/70 bg-black/10 p-3"><p className="font-semibold" style={getNameColorStyle(profile.equippedNameColorId)}>{profile.displayName}</p><p className="text-xs" style={{ color: option.mutedText ?? option.text }}>@{profile.handle}</p></div>
                   <Button className="w-full" variant={equipped ? "secondary" : "primary"} disabled={equipped} onClick={() => void buyProfileCard(option.id)}>{equipped ? "Equipped" : owned ? "Equip" : `Buy for ${option.price}`}</Button>
                 </Card>;
               })}
@@ -3393,7 +3446,7 @@ export function LeaderboardPage() {
 
           return (
             <div key={leader.uid} className="rounded-3xl">
-            <Card className="overflow-hidden border border-border p-0" style={{ background: getProfileCardStyle(leader.equippedProfileCardId).background }}>
+            <Card className="overflow-hidden border border-border p-0" style={{ background: getProfileCardStyle(leader.equippedProfileCardId).background, color: getProfileCardStyle(leader.equippedProfileCardId).text }}>
               <div className="h-24 w-full" style={formatBannerStyle(leader)} />
               <div className="relative p-5">
                 <div className="absolute -top-8 left-5 flex h-16 w-16 items-center justify-center rounded-[1.75rem] border-4 border-canvas bg-canvas">
@@ -3419,8 +3472,8 @@ export function LeaderboardPage() {
                         <span style={getNameColorStyle(leader.equippedNameColorId)}>{leader.displayName}</span>
                       </button>
                     </div>
-                    <p className="mt-1 text-sm text-textMuted">@{leader.handle}</p>
-                    <p className="mt-2 line-clamp-2 text-sm text-textMuted">{leader.bio || "No bio yet."}</p>
+                    <p className="mt-1 text-sm" style={{ color: getProfileCardStyle(leader.equippedProfileCardId).mutedText }}>{`@${leader.handle}`}</p>
+                    <p className="mt-2 line-clamp-2 text-sm" style={{ color: getProfileCardStyle(leader.equippedProfileCardId).mutedText }}>{leader.bio || "No bio yet."}</p>
                   </div>
                   <div className="rounded-2xl border border-border bg-surface/80 px-4 py-3 text-right backdrop-blur-sm">
                     <p className="text-xs uppercase tracking-[0.16em] text-textMuted">{metricLabel}</p>
@@ -3450,7 +3503,3 @@ export function AboutPage() {
 export function NotFoundPage() {
   return <PageFrame title="Page Not Found" subtitle="The route does not exist in this demo." />;
 }
-
-
-
-

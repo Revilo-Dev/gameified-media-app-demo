@@ -7,6 +7,7 @@ import { addGamblingResult, addGemsToUser, addXpToUser, subscribeToUserProfileBy
 import type { UserProfile } from "@/types/models";
 
 const SIDES = [1, 2, 3, 4, 5, 6] as const;
+const MAX_GAMBLING_WITHDRAWAL = 10_000_000;
 
 export function DiceGame() {
   const { user } = useAuth();
@@ -48,7 +49,7 @@ export function DiceGame() {
     setRolledSide(result);
 
     if (result === pickedSide) {
-      const payout = wager * 4;
+      const payout = Math.min(MAX_GAMBLING_WITHDRAWAL, wager * 4);
       await addGemsToUser(user.uid, payout);
       await addGamblingResult(user.uid, "gain", payout);
       await addXpToUser(user.uid, Math.max(1, Math.floor(payout / 40)));

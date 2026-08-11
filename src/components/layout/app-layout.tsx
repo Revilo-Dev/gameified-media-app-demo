@@ -34,7 +34,7 @@ import { subscribeToFollowCounts } from "@/firebase/follows";
 import { createNotification, subscribeToNotifications } from "@/firebase/notifications";
 import { subscribeToLeaderboardRank } from "@/firebase/posts";
 import { claimDailyReward, resetAllCrypto, resetAllGems } from "@/firebase/functions";
-import { addGemsToUser, addXpToUser, subscribeToActivityHistory, updateUserProfile } from "@/firebase/users";
+import { addGemsToUser, addXpToUser, subscribeToActivityHistory, subscribeToUserProfileById, updateUserProfile } from "@/firebase/users";
 import { getNameColorStyle } from "@/constants/name-colors";
 import { users } from "@/lib/demo-data";
 import { readCache, writeCache } from "@/lib/persistent-cache";
@@ -91,6 +91,7 @@ export function AppLayout() {
   const [gemDelta, setGemDelta] = useState(0);
   const [gemFlash, setGemFlash] = useState<"gain" | "spend" | null>(null);
   const [activityHistory, setActivityHistory] = useState<ActivityHistoryEntry[]>([]);
+  const [activityProfiles, setActivityProfiles] = useState<Record<string, UserProfile | null>>({});
   const [isSidebarGemsEditing, setIsSidebarGemsEditing] = useState(false);
   const [sidebarGemValue, setSidebarGemValue] = useState("");
   const previousRankRef = useRef<number | null>(null);
@@ -257,6 +258,32 @@ export function AppLayout() {
   }, [profile.gems]);
 
   useEffect(() => subscribeToActivityHistory(setActivityHistory), []);
+
+  useEffect(() => {
+    if (!activityHistory.length) {
+      setActivityProfiles({});
+      return;
+    }
+
+    const uniqueUserIds = Array.from(new Set(activityHistory.map((entry) => entry.userId).filter(Boolean)));
+    const unsubscribers = uniqueUserIds.map((userId) =>
+      subscribeToUserProfileById(userId, (nextProfile) => {
+        setActivityProfiles((current) => ({ ...current, [userId]: nextProfile }));
+      })
+    );
+
+    setActivityProfiles((current) => {
+      const nextProfiles: Record<string, UserProfile | null> = {};
+      for (const userId of uniqueUserIds) {
+        nextProfiles[userId] = current[userId] ?? (userId === profile.uid ? profile : users.find((candidate) => candidate.uid === userId) ?? null);
+      }
+      return nextProfiles;
+    });
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [activityHistory]);
 
   if (!user) {
     return (
@@ -431,9 +458,24 @@ export function AppLayout() {
             <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
               {activityHistory.length ? activityHistory.map((entry) => (
                 <div key={entry.id} className="rounded-xl border border-border bg-surface px-3 py-2 text-xs">
-                  <div className="flex items-center justify-between gap-2"><p className="font-semibold">{entry.title}</p><span className="capitalize text-textMuted">{entry.category}</span></div>
-                  <p className="mt-1 text-textMuted">{entry.detail}</p>
-                  <p className="mt-1 text-[11px] text-textMuted">{new Date(entry.createdAt).toLocaleString()}</p>
+                  {(() => {
+                    const entryProfile = activityProfiles[entry.userId] ?? users.find((candidate) => candidate.uid === entry.userId) ?? null;
+
+                    return (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <Avatar name={entryProfile?.displayName ?? "Unknown profile"} src={entryProfile?.photoURL ?? null} className="h-8 w-8 rounded-xl" />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-semibold">{entry.title}</p>
+                            <p className="truncate text-[11px] text-textMuted">{entryProfile ? `${entryProfile.displayName} @${entryProfile.handle}` : "Unknown profile"}</p>
+                          </div>
+                          <span className="capitalize text-textMuted">{entry.category}</span>
+                        </div>
+                        <p className="mt-1 text-textMuted">{entry.detail}</p>
+                        <p className="mt-1 text-[11px] text-textMuted">{new Date(entry.createdAt).toLocaleString()}</p>
+                      </>
+                    );
+                  })()}
                 </div>
               )) : <p className="text-sm text-textMuted">No trades, gambles, or purchases yet.</p>}
             </div>

@@ -43,6 +43,8 @@ function normalizeGemAmount(value: number, minimum = 0) {
   return Number(Math.max(minimum, Number.isFinite(numericValue) ? numericValue : minimum).toFixed(2));
 }
 
+const MAX_GAMBLING_WITHDRAWAL = 10_000_000;
+
 async function createUniqueHandle(baseHandle: string, currentUserId?: string) {
   const safeBase = baseHandle.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "").slice(0, 20) || `user${(currentUserId ?? "guest").slice(0, 6)}`;
   let candidate = safeBase;
@@ -221,14 +223,15 @@ export async function addGamblingResult(userId: string, type: "gain" | "loss", a
     }
 
     const safeAmount = Math.max(0, Math.floor(amount));
+    const cappedAmount = type === "gain" ? Math.min(MAX_GAMBLING_WITHDRAWAL, safeAmount) : safeAmount;
     transaction.update(ref, {
-      gamblingGains: Number(snapshot.data().gamblingGains ?? 0) + (type === "gain" ? safeAmount : 0),
+      gamblingGains: Number(snapshot.data().gamblingGains ?? 0) + (type === "gain" ? cappedAmount : 0),
       gamblingLosses: Number(snapshot.data().gamblingLosses ?? 0) + (type === "loss" ? safeAmount : 0),
       updatedAt: serverTimestamp(),
     });
   });
 
-  await recordActivity(userId, "gamble", title, `${type === "gain" ? "Won" : "Wagered"} ${formatHistoryAmount(amount)} gems`, amount);
+  await recordActivity(userId, "gamble", title, `${type === "gain" ? "Won" : "Wagered"} ${formatHistoryAmount(type === "gain" ? Math.min(MAX_GAMBLING_WITHDRAWAL, amount) : amount)} gems`, amount);
 }
 
 function formatHistoryAmount(amount: number) {

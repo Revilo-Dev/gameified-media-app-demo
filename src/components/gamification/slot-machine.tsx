@@ -64,6 +64,7 @@ const PAYOUT_ROWS = [
   { icon: Sparkles, label: "3 slots", value: "6x" },
   { icon: Diamond, label: "3 diamonds", value: "8x" },
 ] as const;
+const MAX_GAMBLING_WITHDRAWAL = 10_000_000;
 
 export function SlotMachine() {
   const { user } = useAuth();
@@ -108,7 +109,7 @@ export function SlotMachine() {
 
     const win = evaluateSpin(finalIds);
     if (win) {
-      const payout = Math.floor(wager * win.multiplier);
+      const payout = Math.min(MAX_GAMBLING_WITHDRAWAL, Math.floor(wager * win.multiplier));
       await addGemsToUser(user.uid, payout);
       await addGamblingResult(user.uid, "gain", payout);
       await addXpToUser(user.uid, Math.max(2, Math.floor(payout / 40)));

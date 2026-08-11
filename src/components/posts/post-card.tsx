@@ -15,9 +15,9 @@ import { getProfileCardStyle } from "@/constants/profile-cards";
 import { setPostBookmarked, subscribeToBookmarkedPostIds } from "@/firebase/bookmarks";
 import { db } from "@/firebase/config";
 import { setFollowingRelationship, subscribeToFollowRelationship } from "@/firebase/follows";
-import { deletePostCascade as deletePostCascadeCallable } from "@/firebase/functions";
 import { createNotification } from "@/firebase/notifications";
 import { ratePost, removePostEmbed, softDeletePost, subscribeToPostReactions, throwRottenTomato } from "@/firebase/posts";
+import { deletePostCascade } from "@/firebase/posts";
 import { getDemoUserById, getModeratorIds, subscribeToUserProfileById } from "@/firebase/users";
 import { getNameColorStyle } from "@/constants/name-colors";
 import type { Post, UserProfile } from "@/types/models";
@@ -56,6 +56,7 @@ export function PostCard({
   const [hasThrownRottenTomato, setHasThrownRottenTomato] = useState(false);
   const [isTomatoAnimating, setIsTomatoAnimating] = useState(false);
   const [isProfilePreviewOpen, setIsProfilePreviewOpen] = useState(false);
+  const [isEmbedRemovedLocally, setIsEmbedRemovedLocally] = useState(false);
   const poll = post.poll ?? null;
   const pollEnded = poll ? new Date(poll.endsAt).getTime() <= Date.now() : false;
   const currentPollVote = poll && currentUserProfile ? poll.options.find((option) => poll.votes?.[option]?.includes(currentUserProfile.uid)) ?? null : null;
@@ -142,6 +143,10 @@ export function PostCard({
     return undefined;
   }, [post.rottenTomatoCount]);
 
+  useEffect(() => {
+    setIsEmbedRemovedLocally(false);
+  }, [post.id, post.imageURL, post.gifURL, post.poll, post.imageUrls?.join(","), post.imageStoragePaths?.join(",")]);
+
   const totalPollVotes = useMemo(() => {
     if (!poll) {
       return 0;
@@ -209,7 +214,6 @@ export function PostCard({
           className="h-10 w-10 rounded-2xl"
           borderId={author?.equippedProfileBorderId}
           disableBorder={disableBorders}
-          disableBorderAnimation
         />
         <div className="min-w-0 flex-1 space-y-3">
           <div className="flex items-start justify-between gap-3">
@@ -219,7 +223,14 @@ export function PostCard({
                   <button type="button" className="text-left text-sm font-semibold hover:underline" onClick={() => navigate(profilePath)}>
                     <span style={disableEffects ? undefined : getNameColorStyle(author?.equippedNameColorId)}>{author?.displayName ?? "Unknown profile"}</span>
                   </button>
-                  {isProfilePreviewOpen && author ? <span className="absolute left-0 top-6 z-30 block w-60 rounded-2xl border border-border p-3 text-left shadow-panel" style={{ background: getProfileCardStyle(author.equippedProfileCardId).background }}><span className="block font-semibold">{author.displayName}</span><span className="block text-xs text-textMuted">@{author.handle} · Level {author.level}</span><span className="mt-2 block line-clamp-2 text-xs text-textMuted">{author.bio || "No bio yet."}</span></span> : null}
+                  {isProfilePreviewOpen && author ? (() => {
+                    const cardStyle = getProfileCardStyle(author.equippedProfileCardId);
+                    return <span className="absolute left-0 top-6 z-30 block w-60 rounded-2xl border border-border p-3 text-left shadow-panel" style={{ background: cardStyle.background, color: cardStyle.text }}>
+                      <span className="block font-semibold">{author.displayName}</span>
+                      <span className="block text-xs" style={{ color: cardStyle.mutedText }}>{`@${author.handle} · Level ${author.level}`}</span>
+                      <span className="mt-2 block line-clamp-2 text-xs" style={{ color: cardStyle.mutedText }}>{author.bio || "No bio yet."}</span>
+                    </span>;
+                  })() : null}
                 </span>
                 {author ? <span className="rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--accent)]">Lv {author.level}</span> : null}
                 {author ? <UserBadges user={author} /> : null}
@@ -301,6 +312,7 @@ export function PostCard({
                         onClick={async () => {
                           try {
                             await removePostEmbed(post.id);
+                            setIsEmbedRemovedLocally(true);
                             setMenuOpen(false);
                             toast.success("Post embed removed");
                           } catch (error) {
@@ -318,7 +330,7 @@ export function PostCard({
                         className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-red-500 hover:bg-surfaceAlt"
                         onClick={async () => {
                           try {
-                            await deletePostCascadeCallable(post.id);
+                            await deletePostCascade(post.id);
                             setMenuOpen(false);
                             toast.success("Post deleted");
                           } catch (error) {
@@ -350,8 +362,8 @@ export function PostCard({
             </p>
           </div>
 
-          {post.gifURL ? <img src={post.gifURL} alt="Attached GIF" loading="eager" decoding="async" fetchPriority={priority === "high" ? "high" : "auto"} className="max-h-[20rem] w-full rounded-3xl border border-border object-cover" /> : null}
-          {imageUrls.length ? (
+          {!isEmbedRemovedLocally && post.gifURL ? <img src={post.gifURL} alt="Attached GIF" loading="eager" decoding="async" fetchPriority={priority === "high" ? "high" : "auto"} className="max-h-[20rem] w-full rounded-3xl border border-border object-cover" /> : null}
+          {!isEmbedRemovedLocally && imageUrls.length ? (
             <div className={`grid gap-3 ${imageUrls.length === 1 ? "grid-cols-1" : imageUrls.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
               {imageUrls.map((imageUrl, index) => (
                 <img
@@ -367,7 +379,7 @@ export function PostCard({
             </div>
           ) : null}
 
-          {poll ? (
+          {!isEmbedRemovedLocally && poll ? (
             <div className="space-y-3 rounded-3xl border border-border bg-surfaceAlt/30 p-4">
               <div className="flex items-center justify-between gap-3">
                 <p className="font-semibold">{poll.question}</p>

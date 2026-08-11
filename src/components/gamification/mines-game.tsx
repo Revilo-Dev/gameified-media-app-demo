@@ -8,6 +8,7 @@ import type { UserProfile } from "@/types/models";
 
 const TILE_COUNT = 25;
 const MAX_PAYOUT = 2_000_000;
+const MAX_GAMBLING_WITHDRAWAL = 10_000_000;
 const MINE_MULTIPLIERS: Record<number, number> = { 1: 1.03, 2: 1.05, 3: 1.08, 4: 1.11, 5: 1.14, 6: 1.17 };
 
 export function MinesGame() {
@@ -22,7 +23,7 @@ export function MinesGame() {
   const tileMultiplier = MINE_MULTIPLIERS[mineCount];
   const multiplier = Number((tileMultiplier ** revealed.size).toFixed(2));
   const probability = ((TILE_COUNT - mineCount) / TILE_COUNT) * 100;
-  const payout = Number(Math.min(MAX_PAYOUT, bet * multiplier).toFixed(2));
+  const payout = Number(Math.min(MAX_PAYOUT, MAX_GAMBLING_WITHDRAWAL, bet * multiplier).toFixed(2));
 
   useEffect(() => {
     if (!user) { setProfile(null); return; }

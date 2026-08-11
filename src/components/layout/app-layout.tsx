@@ -331,7 +331,7 @@ export function AppLayout() {
             }`}>
               {isSidebarGemsEditing ? <form onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); const nextValue = Number(sidebarGemValue); if (!Number.isFinite(nextValue) || nextValue < 0) { toast.error("Gems must be a non-negative number."); return; } void updateUserProfile(profile.uid, { gems: nextValue }).then(() => { setIsSidebarGemsEditing(false); toast.success("Gems updated"); }).catch((error) => toast.error(error instanceof Error ? error.message : "Unable to update gems")); }} className="flex items-center gap-2"><input autoFocus inputMode="decimal" value={sidebarGemValue} onChange={(event) => setSidebarGemValue(event.target.value)} className="min-w-0 flex-1 bg-transparent text-xl font-bold tabular-nums outline-none" /><Button type="submit" size="sm">Save</Button><Button type="button" variant="ghost" size="sm" onClick={() => setIsSidebarGemsEditing(false)}>Cancel</Button></form> : <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-textMuted">Gems</p>
+                  <p className="flex items-center gap-1.5 text-textMuted"><Gem size={14} className="text-[color:var(--accent)]" /> Gems</p>
                   <p className="mt-1 text-xl font-bold tabular-nums">{displayedGems}</p>
                 </div>
                 {gemDelta !== 0 ? (

@@ -3,7 +3,7 @@ import { Dices } from "lucide-react";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { useAuth } from "@/app/auth-provider";
-import { addGamblingResult, addGemsToUser, addXpToUser, subscribeToUserProfileById } from "@/firebase/users";
+import { settleGamblingRound, subscribeToUserProfileById } from "@/firebase/users";
 import type { UserProfile } from "@/types/models";
 
 const SIDES = [1, 2, 3, 4, 5, 6] as const;
@@ -37,9 +37,6 @@ export function DiceGame() {
     }
 
     setIsRolling(true);
-    await addGemsToUser(user.uid, -wager);
-    await addGamblingResult(user.uid, "loss", wager);
-
     for (let index = 0; index < 12; index += 1) {
       await new Promise((resolve) => setTimeout(resolve, 70));
       setRolledSide(SIDES[Math.floor(Math.random() * SIDES.length)]);
@@ -48,18 +45,14 @@ export function DiceGame() {
     const result = SIDES[Math.floor(Math.random() * SIDES.length)];
     setRolledSide(result);
 
-    if (result === pickedSide) {
-      const payout = Math.min(MAX_GAMBLING_WITHDRAWAL, wager * 4);
-      await addGemsToUser(user.uid, payout);
-      await addGamblingResult(user.uid, "gain", payout);
-      await addXpToUser(user.uid, Math.max(1, Math.floor(payout / 40)));
-    }
+    const payout = result === pickedSide ? Math.min(MAX_GAMBLING_WITHDRAWAL, wager * 4) : 0;
+    await settleGamblingRound(user.uid, { wager, payout, xpReward: payout ? Math.max(1, Math.floor(payout / 40)) : 0, title: "Dice pick" });
 
     setIsRolling(false);
   }
 
   return (
-    <Card className="space-y-5 p-6">
+    <Card className="arcade-game-card space-y-5 p-6">
       <div className="flex items-center gap-2">
         <Dices className="h-5 w-5 text-[color:var(--accent)]" />
         <h3 className="text-lg font-semibold">Dice Pick</h3>

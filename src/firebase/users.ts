@@ -235,6 +235,45 @@ export async function addGamblingResult(userId: string, type: "gain" | "loss", a
   await recordActivity(userId, "gamble", title, `${type === "gain" ? "Won" : "Wagered"} ${formatHistoryAmount(type === "gain" ? Math.min(MAX_GAMBLING_WITHDRAWAL, amount) : amount)} gems`, amount);
 }
 
+/** Atomically settles a whole arcade round in one Firestore transaction. */
+export async function settleGamblingRound(userId: string, input: { wager: number; payout?: number; xpReward?: number; title: string }) {
+  const ref = doc(db, COLLECTIONS.users, userId);
+  const wager = Math.max(0, Math.floor(input.wager));
+  const payout = Math.min(MAX_GAMBLING_WITHDRAWAL, Math.max(0, Math.floor(input.payout ?? 0)));
+  const xpReward = Math.max(0, Math.floor(input.xpReward ?? 0));
+  let leveledUp = false;
+  let nextLevel = 1;
+
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists()) throw new Error("Your profile is missing.");
+
+    const currentGems = Number(snapshot.data().gems ?? 0);
+    if (currentGems < wager) throw new Error("You no longer have enough gems for this wager.");
+    const currentXp = Number(snapshot.data().xp ?? 0);
+    const previousLevel = Number(snapshot.data().level ?? getLevelForXp(currentXp));
+    const nextXp = currentXp + xpReward;
+    nextLevel = getLevelForXp(nextXp);
+    leveledUp = nextLevel > previousLevel;
+
+    transaction.update(ref, {
+      gems: normalizeGemAmount(currentGems - wager + payout),
+      gamblingGains: Number(snapshot.data().gamblingGains ?? 0) + payout,
+      gamblingLosses: Number(snapshot.data().gamblingLosses ?? 0) + wager,
+      xp: nextXp,
+      level: nextLevel,
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  void recordActivity(userId, "gamble", input.title, payout ? `Won ${formatHistoryAmount(payout)} gems` : `Wagered ${formatHistoryAmount(wager)} gems`, payout || wager)
+    .catch((error) => console.error("Failed to record gambling activity", error));
+  if (leveledUp) {
+    void createNotification({ type: "level", title: "Level up", body: `You reached level ${nextLevel}.`, actorId: userId, userId, postId: null })
+      .catch((error) => console.error("Failed to create level notification", error));
+  }
+}
+
 function formatHistoryAmount(amount: number) {
   return Number(Math.max(0, amount).toFixed(2)).toLocaleString();
 }

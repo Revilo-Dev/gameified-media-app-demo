@@ -2739,13 +2739,21 @@ export function BookmarksPage() {
 }
 
 export function ArcadePage() {
+  const { user } = useAuth();
   const [arcadeTab, setArcadeTab] = useState<"slots" | "mines" | "coin" | "dice" | "wheel" | "reaction">("slots");
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+
+  useEffect(() => {
+    if (!user) { setProfile(null); return; }
+    return subscribeToUserProfileById(user.uid, setProfile);
+  }, [user]);
 
   return (
     <PageFrame title="Arcade" subtitle="Wager games and quick challenges.">
       <div className="space-y-5">
         <SectionNav ariaLabel="Arcade games" activeId={arcadeTab} onChange={setArcadeTab} items={[ { id: "slots", label: "Slots" }, { id: "mines", label: "Mines" }, { id: "coin", label: "Coin Toss" }, { id: "dice", label: "Dice" }, { id: "wheel", label: "Wheel Spin" }, { id: "reaction", label: "Reaction Test" } ] as const} />
         {arcadeTab === "slots" ? <SlotMachine /> : arcadeTab === "mines" ? <MinesGame /> : arcadeTab === "coin" ? <CoinToss /> : arcadeTab === "dice" ? <DiceGame /> : arcadeTab === "wheel" ? <WheelSpin /> : <ReactionTest />}
+        {profile ? <Card className="grid gap-3 p-4 sm:grid-cols-2"><div className="rounded-2xl bg-emerald-500/10 p-4"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-300">Gambling gains</p><p className="mt-2 text-2xl font-bold text-emerald-300">+{formatAmount(profile.gamblingGains ?? 0)}</p></div><div className="rounded-2xl bg-red-500/10 p-4"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-red-300">Gambling losses</p><p className="mt-2 text-2xl font-bold text-red-300">-{formatAmount(profile.gamblingLosses ?? 0)}</p></div></Card> : null}
       </div>
     </PageFrame>
   );

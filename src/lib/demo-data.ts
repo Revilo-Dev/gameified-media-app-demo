@@ -11,9 +11,9 @@ import type {
 } from "@/types/models";
 
 export const badges: BadgeDefinition[] = [
-  { id: "first-post", name: "First Post", description: "Published your first pulse.", rarity: "common", icon: "Sparkles" },
-  { id: "starter", name: "Getting Started", description: "Finished onboarding and polished your profile.", rarity: "uncommon", icon: "Compass" },
-  { id: "level-5", name: "Level 5", description: "Reached level five in the network.", rarity: "rare", icon: "Trophy" },
+  { id: "first-post", type: "send-messages", name: "First Post", description: "Published your first pulse.", rarity: "common", icon: "Sparkles", baseRequirement: 100, requirementStep: 100, rewardXp: 10, rewardGems: 5 },
+  { id: "starter", type: "followers", name: "Getting Started", description: "Finished onboarding and polished your profile.", rarity: "uncommon", icon: "Compass", baseRequirement: 5, requirementStep: 5, rewardXp: 10, rewardGems: 5 },
+  { id: "level-5", type: "day-streak", name: "Level 5", description: "Reached level five in the network.", rarity: "rare", icon: "Trophy", baseRequirement: 7, requirementStep: 7, rewardXp: 10, rewardGems: 5 },
 ];
 
 export const users: UserProfile[] = [
@@ -35,7 +35,14 @@ export const users: UserProfile[] = [
     xp: 820,
     credits: 1640,
     featuredBadgeId: "level-5",
+    ownedBadgeIds: ["first-post", "starter", "level-5"],
+    badgeProgress: {
+      "first-post": { badgeId: "first-post", level: 1, progress: 42, unlockedAt: "2026-03-01T08:00:00.000Z" },
+      starter: { badgeId: "starter", level: 1, progress: 3, unlockedAt: "2026-02-18T08:00:00.000Z" },
+      "level-5": { badgeId: "level-5", level: 1, progress: 5, unlockedAt: "2026-04-21T08:00:00.000Z" },
+    },
     isPremium: true,
+    isPremiumPlus: false,
     isModerator: true,
     isVerified: true,
     isPrivate: false,
@@ -73,7 +80,7 @@ export const users: UserProfile[] = [
     followingCount: 111,
     postCount: 46,
     rottenTomatoCount: 2,
-    badgeCount: 12,
+    badgeCount: 3,
     joinedAt: "2026-01-11T10:00:00.000Z",
     lastOnlineAt: "2026-08-03T08:42:00.000Z",
   },
@@ -95,7 +102,12 @@ export const users: UserProfile[] = [
     xp: 465,
     credits: 890,
     featuredBadgeId: "starter",
+    ownedBadgeIds: ["starter"],
+    badgeProgress: {
+      starter: { badgeId: "starter", level: 1, progress: 1, unlockedAt: "2026-04-10T08:00:00.000Z" },
+    },
     isPremium: false,
+    isPremiumPlus: false,
     isModerator: false,
     isVerified: false,
     isPrivate: false,
@@ -133,7 +145,7 @@ export const users: UserProfile[] = [
     followingCount: 79,
     postCount: 18,
     rottenTomatoCount: 1,
-    badgeCount: 4,
+    badgeCount: 1,
     joinedAt: "2026-02-16T10:00:00.000Z",
     lastOnlineAt: "2026-08-02T22:10:00.000Z",
   },

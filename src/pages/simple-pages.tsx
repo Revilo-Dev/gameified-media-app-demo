@@ -31,6 +31,7 @@ import { getNameColorStyle, NAME_COLOR_OPTIONS } from "@/constants/name-colors";
 import { PROFILE_BORDER_OPTIONS, getProfileBorderStyle } from "@/constants/profile-borders";
 import { PROFILE_CARD_OPTIONS, getProfileCardStyle } from "@/constants/profile-cards";
 import { themePresets } from "@/lib/theme-presets";
+import { BADGE_DEFINITIONS, getBadgeRequirement, getBadgeIcon, getBadgeStates } from "@/lib/badges";
 import { banUserAccount, checkIpBan, recordPostView, registerUserDeviceIp, resetAllCrypto, resetAllGems } from "@/firebase/functions";
 import { hasUnreadConversation, markConversationRead, sendDirectMessage, startConversation, subscribeToAllConversations, subscribeToConversationMessages, subscribeToConversations } from "@/firebase/chat";
 import { createInitialCryptoMarketState, moderateCryptoMarket, subscribeToCryptoMarket, type CryptoMarketState } from "@/firebase/crypto-market";
@@ -284,6 +285,10 @@ function getOwnedThemeIds(profile: Pick<UserProfile, "ownedThemeIds" | "theme">)
 
 function formatInventoryRarityLabel(rarity: string) {
   return rarity.charAt(0).toUpperCase() + rarity.slice(1);
+}
+
+function formatBadgeProgress(progress: number, requirement: number) {
+  return `${Math.min(progress, requirement)}/${requirement}`;
 }
 
 function ReplyCard({
@@ -559,7 +564,7 @@ export function ProfilePage() {
   const [followsViewer, setFollowsViewer] = useState(false);
   const [isTogglingFollow, setIsTogglingFollow] = useState(false);
   const [allUserPosts, setAllUserPosts] = useState<Post[]>([]);
-  const [profileTab, setProfileTab] = useState<"posts" | "replies" | "stats" | "inventory">("stats");
+  const [profileTab, setProfileTab] = useState<"posts" | "replies" | "stats" | "inventory" | "badges">("stats");
   const [leaderboardRank, setLeaderboardRank] = useState<number | null>(null);
   const [followModalTab, setFollowModalTab] = useState<"followers" | "following" | null>(null);
   const [followerIds, setFollowerIds] = useState<string[]>([]);
@@ -686,6 +691,8 @@ export function ProfilePage() {
       .filter((option): option is (typeof PROFILE_BORDER_OPTIONS)[number] => Boolean(option)),
     [user],
   );
+  const badgeStates = useMemo(() => (user ? getBadgeStates(user) : []), [user]);
+  const earnedBadgeStates = useMemo(() => badgeStates.filter((badge) => badge.owned), [badgeStates]);
   const isMutual = isFollowing && followsViewer;
   const canViewPosts = !user?.isPrivate || isOwnProfile || isMutual;
 
@@ -1034,6 +1041,7 @@ export function ProfilePage() {
             { id: "replies", label: `Replies ${userReplies.length}` },
             { id: "stats", label: "Profile" },
             { id: "inventory", label: "Inventory" },
+            { id: "badges", label: "Badges" },
           ] as const}
         />
         {!canViewPosts ? (
@@ -1191,6 +1199,64 @@ export function ProfilePage() {
                   </div>
                 ))}
               </div>
+            </Card>
+          </div>
+        ) : profileTab === "badges" ? (
+          <div className="space-y-4">
+            <Card className="space-y-4 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Badge Showcase</p>
+                  <p className="mt-1 text-sm text-textMuted">{earnedBadgeStates.length} unlocked, {badgeStates.length - earnedBadgeStates.length} in progress</p>
+                </div>
+                <div className="rounded-2xl border border-border bg-surfaceAlt/40 px-4 py-3 text-right">
+                  <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Owned</p>
+                  <p className="mt-1 text-xl font-bold tabular-nums">{user.badgeCount ?? earnedBadgeStates.length}</p>
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {badgeStates.map((badge) => (
+                  <div key={badge.id} className={`rounded-2xl border px-4 py-4 ${badge.owned ? "border-[color:var(--accent)]/40 bg-[color:var(--accent)]/6" : "border-border bg-surfaceAlt/35"}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold">{badge.name}</p>
+                        <p className="mt-1 text-xs text-textMuted">{badge.description}</p>
+                      </div>
+                      <div className="text-right text-xs text-textMuted">
+                        <p className="font-semibold uppercase tracking-[0.14em]">{formatInventoryRarityLabel(badge.rarity)}</p>
+                        <p>Lv {badge.level}</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 space-y-2">
+                      <div className="h-2 overflow-hidden rounded-full bg-surface">
+                        <div className="h-full rounded-full bg-[color:var(--accent)] transition-all" style={{ width: `${Math.min(100, Math.round((badge.progress / badge.requirement) * 100))}%` }} />
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-textMuted">
+                        <span>{formatBadgeProgress(badge.progress, badge.requirement)}</span>
+                        <span>+{badge.rewardXp} XP, +{badge.rewardGems} gems</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+            <Card className="space-y-3 p-5">
+              <div>
+                <p className="text-xs uppercase tracking-[0.16em] text-textMuted">Unlocked badges</p>
+                <p className="mt-1 text-sm text-textMuted">Badges can level up multiple times, and each level increases the next requirement.</p>
+              </div>
+              {earnedBadgeStates.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {earnedBadgeStates.map((badge) => (
+                    <span key={badge.id} className="inline-flex items-center gap-2 rounded-full border border-border bg-surfaceAlt px-3 py-2 text-sm font-semibold">
+                      <span className="h-2.5 w-2.5 rounded-full bg-[color:var(--accent)]" />
+                      {badge.name} Lv {badge.level}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-textMuted">No badges unlocked yet.</p>
+              )}
             </Card>
           </div>
         ) : profileTab === "posts" ? (
@@ -1851,63 +1917,90 @@ function ModeratorTimeoutButton({ targetUserId }: { targetUserId: string }) {
 }
 
 export function PremiumPage() {
+  const perks = [
+    { label: "Premium checkmark on profile", premium: true, premiumPlus: true },
+    { label: "Badge XP and gem multipliers", premium: true, premiumPlus: true },
+    { label: "5% market discount", premium: true, premiumPlus: true },
+    { label: "Higher daily gem rewards", premium: true, premiumPlus: true },
+    { label: "Animated profile cosmetics", premium: true, premiumPlus: true },
+    { label: "Hide activity from your profile", premium: false, premiumPlus: true },
+    { label: "Private following list", premium: false, premiumPlus: true },
+    { label: "Priority support queue", premium: false, premiumPlus: true },
+    { label: "Profile header spotlight", premium: true, premiumPlus: true },
+    { label: "Early access to new perks", premium: false, premiumPlus: true },
+  ] as const;
+
   return (
-    <PageFrame title="Premium" subtitle="Upgrade to premium">
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(18rem,0.7fr)]">
-        <Card className="space-y-5 overflow-hidden p-0">
-          <div className="bg-[radial-gradient(circle_at_top_left,_rgba(255,107,87,0.35),_transparent_42%),linear-gradient(135deg,#20131a_0%,#402029_52%,#ff6b57_100%)] p-14 text-white">
-            <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em]">
+    <PageFrame title="Premium" subtitle="Compare Premium and Premium+ perks, then choose the tier that fits your play style.">
+      <div className="space-y-5">
+        <Card className="overflow-hidden border border-border p-0">
+          <div className="bg-[radial-gradient(circle_at_top_left,_rgba(255,107,87,0.35),_transparent_34%),radial-gradient(circle_at_top_right,_rgba(244,114,182,0.22),_transparent_28%),linear-gradient(135deg,#161219_0%,#261820_45%,#ff6b57_100%)] p-8 text-white sm:p-10">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em]">
               <Sparkles size={14} />
-              Premium
+              Membership
             </div>
-            <h2 className="mt-4 max-w-xl text-3xl font-bold">Premium perks that actually change how your account feels.</h2>
-            <p className="mt-3 max-w-2xl text-sm text-white/80">Cosmetics, extra rewards, stronger odds, and a few quality-of-life flexes in one cheap upgrade.</p>
+            <h2 className="mt-4 max-w-2xl text-3xl font-bold sm:text-4xl">Subscribe to Premium today!S</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-white/80">Premium gives you all the essentials. Premium+ give you control over status, privacy, and stronger progression boosts and discounts.</p>
           </div>
         </Card>
 
         <Card className="space-y-4 p-6">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent)]">Premium</p>
-            <h3 className="mt-2 text-2xl font-bold">$1 / month</h3>
-            <p className="mt-2 text-sm text-textMuted">Best value</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent)]">Premium</p>
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h3 className="text-2xl font-bold">$1 / month</h3>
+              <p className="mt-2 max-w-2xl text-sm text-textMuted">Best for cosmetics, rewards, and progress boosts.</p>
+            </div>
+            <Button className="w-full gap-2 md:w-auto">
+              <Crown size={16} />
+              Buy Premium
+            </Button>
           </div>
-          <Button className="w-full gap-2">
-            <Crown size={16} />
-            Buy Premium
-          </Button>
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent)]">Premium +</p>
-            <h3 className="mt-2 text-2xl font-bold">$5 / month</h3>
-            <p className="mt-2 text-sm text-textMuted">Most popular</p>
+        </Card>
+
+        <Card className="space-y-4 p-6">
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-fuchsia-300">Premium+</p>
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h3 className="text-2xl font-bold">$5 / month</h3>
+              <p className="mt-2 max-w-2xl text-sm text-textMuted">Best for privacy, premium status, and faster badge growth.</p>
+            </div>
+            <Button variant="secondary" className="w-full gap-2 md:w-auto">
+              <Sparkles size={16} />
+              Buy Premium+
+            </Button>
           </div>
-          <Button className="w-full gap-2">
-            <Crown size={16} />
-            Buy Premium+
-          </Button>
         </Card>
       </div>
 
-      <Card className="p-6">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {[
-            "Verified checkmark",
-            "Banner headers",
-            "Increased daily rewards",
-            "5% market discount",
-            "+5% gambling odds",
-            "+150 daily gems",
-            "Hidden last online",
-            "Update @ handle",
-            "Animated pfp",
-            "Free rotten tomatoes",
-          ].map((benefit) => (
-            <div key={benefit} className="inline-flex items-center gap-2 rounded-2xl border border-border bg-surfaceAlt/30 px-4 py-3 text-sm">
-              <Check size={15} className="text-[color:var(--accent)]" />
-              {benefit}
+      <Card className="space-y-5 p-6">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent)]">Feature comparison</p>
+            <h3 className="mt-2 text-2xl font-bold">Premium vs Premium+</h3>
+          </div>
+          <p className="text-sm text-textMuted">Premium+ includes everything in Premium, plus the items listed below.</p>
+        </div>
+        <div className="divide-y divide-border overflow-hidden rounded-3xl border border-border bg-surfaceAlt/25">
+          {perks.map((perk) => (
+            <div key={perk.label} className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(0,1fr)_10rem_10rem] md:items-center">
+              <div>
+                <p className="font-semibold">{perk.label}</p>
+                <p className="text-xs text-textMuted">{perk.premiumPlus && !perk.premium ? "Premium+" : "Included in both tiers"}</p>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-textMuted">
+                {perk.premium ? <Check size={16} className="text-emerald-300" /> : <span className="text-textMuted">-</span>}
+                <span>{perk.premium ? "Premium" : "No"}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-textMuted">
+                {perk.premiumPlus ? <Check size={16} className="text-fuchsia-300" /> : <span className="text-textMuted">-</span>}
+                <span>{perk.premiumPlus ? "Premium+" : "No"}</span>
+              </div>
             </div>
           ))}
         </div>
       </Card>
+
     </PageFrame>
   );
 }
@@ -3516,36 +3609,17 @@ export function LeaderboardPage() {
   return (
     <PageFrame title="Leaderboard" subtitle="Switch between the top level, top gems, and top posts leaders.">
       <div className="space-y-4">
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setLeaderboardTab("level")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${leaderboardTab === "level" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
-          >
-            Top level
-          </button>
-          <button
-            type="button"
-            onClick={() => setLeaderboardTab("gems")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${leaderboardTab === "gems" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
-          >
-            Top gems
-          </button>
-          <button
-            type="button"
-            onClick={() => setLeaderboardTab("posts")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${leaderboardTab === "posts" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
-          >
-            Top posts
-          </button>
-          <button
-            type="button"
-            onClick={() => setLeaderboardTab("followers")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${leaderboardTab === "followers" ? "bg-accent text-white" : "border border-border bg-surface text-textMuted"}`}
-          >
-            Top followers
-          </button>
-        </div>
+        <SectionNav
+          ariaLabel="Leaderboard sections"
+          activeId={leaderboardTab}
+          onChange={setLeaderboardTab}
+          items={[
+            { id: "level", label: "Top level" },
+            { id: "gems", label: "Top gems" },
+            { id: "posts", label: "Top posts" },
+            { id: "followers", label: "Top followers" },
+          ] as const}
+        />
         {leaders.map((leader, index) => {
           const metricValue = leaderboardTab === "level" ? leader.level : leaderboardTab === "gems" ? leader.gems : leaderboardTab === "followers" ? leader.followerCount : leader.postCount;
 

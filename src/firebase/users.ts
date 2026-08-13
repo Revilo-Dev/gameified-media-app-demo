@@ -88,6 +88,7 @@ export async function ensureUserProfile(user: User) {
     credits: 0,
     featuredBadgeId: null,
     isPremium: false,
+    isPremiumPlus: false,
     isModerator: false,
     isVerified: false,
     isPrivate: false,

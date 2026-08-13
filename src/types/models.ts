@@ -27,15 +27,38 @@ export type ThemeMode =
 
 export type BadgeRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
 export type CryptoCoinId = "wutax" | "galaxy" | "arc" | "nebula" | "spark" | "lumen" | "titan";
+export type BadgeType =
+  | "rate-messages"
+  | "send-messages"
+  | "reply-messages"
+  | "spend-gems"
+  | "lose-gems"
+  | "win-gems"
+  | "buy-items"
+  | "day-streak"
+  | "tomatoes"
+  | "followers";
 
 export type TimelineTab = "for-you" | "following";
 
 export interface BadgeDefinition {
   id: string;
+  type: BadgeType;
   name: string;
   description: string;
   rarity: BadgeRarity;
   icon: string;
+  baseRequirement: number;
+  requirementStep: number;
+  rewardXp: number;
+  rewardGems: number;
+}
+
+export interface BadgeProgressEntry {
+  badgeId: string;
+  level: number;
+  progress: number;
+  unlockedAt?: string;
 }
 
 export interface UserProfile {
@@ -56,7 +79,10 @@ export interface UserProfile {
   xp: number;
   credits: number;
   featuredBadgeId: string | null;
+  ownedBadgeIds?: string[];
+  badgeProgress?: Record<string, BadgeProgressEntry>;
   isPremium: boolean;
+  isPremiumPlus?: boolean;
   isModerator: boolean;
   isVerified: boolean;
   isPrivate: boolean;

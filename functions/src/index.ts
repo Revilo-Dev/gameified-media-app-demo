@@ -10,6 +10,12 @@ initializeApp();
 const db = getFirestore();
 const auth = getAuth();
 const storage = getStorage();
+const MAX_GEM_TRANSFER = 1_000_000;
+
+function normalizeGemAmount(value: number, minimum = 0) {
+  const numericValue = Number(value);
+  return Number(Math.max(minimum, Number.isFinite(numericValue) ? numericValue : minimum).toFixed(2));
+}
 
 function getRequesterIp(request: Parameters<typeof onCall>[0] extends never ? never : { rawRequest: { headers: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string } } }) {
   const forwardedFor = request.rawRequest.headers["x-forwarded-for"];
@@ -364,6 +370,112 @@ export const resetAllCrypto = onCall(async (request) => {
   }, { merge: true });
 
   return { ok: true };
+});
+
+export const transferGems = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const senderId = request.auth.uid;
+  const recipientId = typeof request.data?.recipientUserId === "string" ? request.data.recipientUserId.trim() : "";
+  const amount = normalizeGemAmount(Number(request.data?.amount), 0);
+  const note = typeof request.data?.note === "string" ? request.data.note.trim().slice(0, 160) : "";
+
+  if (!recipientId) {
+    throw new HttpsError("invalid-argument", "Choose a recipient.");
+  }
+  if (recipientId === senderId) {
+    throw new HttpsError("failed-precondition", "You cannot transfer gems to yourself.");
+  }
+  if (amount <= 0) {
+    throw new HttpsError("invalid-argument", "Enter an amount greater than zero.");
+  }
+  if (amount > MAX_GEM_TRANSFER) {
+    throw new HttpsError("invalid-argument", `Transfers are capped at ${MAX_GEM_TRANSFER.toLocaleString()} gems.`);
+  }
+
+  const senderRef = db.collection("users").doc(senderId);
+  const recipientRef = db.collection("users").doc(recipientId);
+  let senderDisplayName = "Someone";
+  let recipientDisplayName = "that user";
+
+  await db.runTransaction(async (transaction) => {
+    const [senderSnapshot, recipientSnapshot] = await Promise.all([
+      transaction.get(senderRef),
+      transaction.get(recipientRef),
+    ]);
+
+    if (!senderSnapshot.exists) {
+      throw new HttpsError("not-found", "Your profile is missing.");
+    }
+    if (!recipientSnapshot.exists) {
+      throw new HttpsError("not-found", "Recipient not found.");
+    }
+
+    const senderGems = Number(senderSnapshot.get("gems") ?? 0);
+    if (senderGems < amount) {
+      throw new HttpsError("failed-precondition", "You do not have enough gems for that transfer.");
+    }
+
+    const recipientGems = Number(recipientSnapshot.get("gems") ?? 0);
+    senderDisplayName = String(senderSnapshot.get("displayName") ?? "Someone");
+    recipientDisplayName = String(recipientSnapshot.get("displayName") ?? "that user");
+
+    transaction.update(senderRef, {
+      gems: normalizeGemAmount(senderGems - amount),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    transaction.update(recipientRef, {
+      gems: normalizeGemAmount(recipientGems + amount),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  const now = FieldValue.serverTimestamp();
+  const transferRef = db.collection("gemTransfers").doc();
+  const senderActivityRef = db.collection("activityHistory").doc();
+  const recipientActivityRef = db.collection("activityHistory").doc();
+  const notificationRef = db.collection("notifications").doc();
+  const detail = note ? `${note} · ${amount.toLocaleString()} gems` : `${amount.toLocaleString()} gems`;
+
+  await db.batch()
+    .set(transferRef, {
+      senderId,
+      recipientId,
+      amount,
+      note: note || null,
+      createdAt: now,
+    })
+    .set(senderActivityRef, {
+      userId: senderId,
+      category: "transfer",
+      title: `Sent gems to ${recipientDisplayName}`,
+      detail,
+      amount,
+      createdAt: new Date().toISOString(),
+    })
+    .set(recipientActivityRef, {
+      userId: recipientId,
+      category: "transfer",
+      title: `Received gems from ${senderDisplayName}`,
+      detail,
+      amount,
+      createdAt: new Date().toISOString(),
+    })
+    .set(notificationRef, {
+      type: "reward",
+      title: "Gems received",
+      body: `${senderDisplayName} sent you ${amount.toLocaleString()} gems.`,
+      actorId: senderId,
+      userId: recipientId,
+      postId: null,
+      read: false,
+      createdAt: now,
+    })
+    .commit();
+
+  return { ok: true, amount, recipientUserId: recipientId };
 });
 
 export const claimDailyReward = onCall(async (request) => {

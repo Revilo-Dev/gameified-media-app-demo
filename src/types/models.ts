@@ -185,7 +185,7 @@ export interface Conversation {
 export interface ActivityHistoryEntry {
   id: string;
   userId: string;
-  category: "trade" | "gamble" | "purchase";
+  category: "trade" | "gamble" | "purchase" | "transfer";
   title: string;
   detail: string;
   amount?: number;

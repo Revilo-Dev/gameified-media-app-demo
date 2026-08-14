@@ -32,7 +32,7 @@ import { PROFILE_BORDER_OPTIONS, getProfileBorderStyle } from "@/constants/profi
 import { PROFILE_CARD_OPTIONS, getProfileCardStyle } from "@/constants/profile-cards";
 import { themePresets } from "@/lib/theme-presets";
 import { BADGE_DEFINITIONS, getBadgeRequirement, getBadgeIcon, getBadgeStates } from "@/lib/badges";
-import { banUserAccount, checkIpBan, recordPostView, registerUserDeviceIp, resetAllCrypto, resetAllGems } from "@/firebase/functions";
+import { banUserAccount, checkIpBan, recordPostView, registerUserDeviceIp, resetAllCrypto, resetAllGems, transferGems } from "@/firebase/functions";
 import { hasUnreadConversation, markConversationRead, sendDirectMessage, startConversation, subscribeToAllConversations, subscribeToConversationMessages, subscribeToConversations } from "@/firebase/chat";
 import { createInitialCryptoMarketState, moderateCryptoMarket, subscribeToCryptoMarket, type CryptoMarketState } from "@/firebase/crypto-market";
 import { subscribeToBookmarkedPosts } from "@/firebase/bookmarks";
@@ -578,6 +578,10 @@ export function ProfilePage() {
   const [isEditingCoinHoldings, setIsEditingCoinHoldings] = useState(false);
   const [coinHoldingValues, setCoinHoldingValues] = useState<Partial<Record<CryptoCoinId, string>>>({});
   const [isSavingStats, setIsSavingStats] = useState(false);
+  const [isTransferOpen, setIsTransferOpen] = useState(false);
+  const [transferAmount, setTransferAmount] = useState("");
+  const [transferNote, setTransferNote] = useState("");
+  const [isTransferringGems, setIsTransferringGems] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -822,6 +826,38 @@ export function ProfilePage() {
     }
   }
 
+  async function sendGemTransfer() {
+    if (!authUser || !currentUserProfile || !user || isOwnProfile) {
+      toast.error("Sign in to transfer gems.");
+      return;
+    }
+
+    const amount = Number(transferAmount);
+    const roundedAmount = Number(amount.toFixed(2));
+    if (!Number.isFinite(roundedAmount) || roundedAmount <= 0) {
+      toast.error("Enter an amount greater than zero.");
+      return;
+    }
+    if (roundedAmount > currentUserProfile.gems) {
+      toast.error("You do not have enough gems for that transfer.");
+      return;
+    }
+
+    setIsTransferringGems(true);
+    try {
+      await transferGems(user.uid, roundedAmount, transferNote);
+      toast.success("Gems sent", { description: `${formatAmount(roundedAmount)} gems transferred to ${user.displayName}.` });
+      setTransferAmount("");
+      setTransferNote("");
+      setIsTransferOpen(false);
+    } catch (error) {
+      console.error("Failed to transfer gems", error);
+      toast.error(getFirebaseErrorMessage(error));
+    } finally {
+      setIsTransferringGems(false);
+    }
+  }
+
   async function removeOwnedNameColor(colorId: string) {
     if (!canModerateInventory || !user) {
       return;
@@ -920,6 +956,18 @@ export function ProfilePage() {
                       {isOwnProfile ? "Edit profile" : isTogglingFollow ? "Saving..." : isFollowing ? "Following" : "Follow"}
                     </Button>
                     {currentUserId && !isOwnProfile ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="h-9"
+                        disabled={!currentUserProfile}
+                        onClick={() => setIsTransferOpen((current) => !current)}
+                      >
+                        <Send size={15} />
+                        Send gems
+                      </Button>
+                    ) : null}
+                    {currentUserId && !isOwnProfile ? (
                       <div ref={profileMenuRef} className="relative">
                         <Button type="button" variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => setIsProfileMenuOpen((current) => !current)}>
                           <MoreHorizontal size={16} />
@@ -997,6 +1045,50 @@ export function ProfilePage() {
           </div>
 
           <p className="text-sm leading-6 text-text">{user.bio || "No bio added yet."}</p>
+
+          {currentUserId && !isOwnProfile && isTransferOpen ? (
+            <form
+              className="grid gap-3 rounded-2xl border border-border bg-surfaceAlt/45 p-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_auto]"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void sendGemTransfer();
+              }}
+            >
+              <label className="space-y-1 text-sm font-semibold" htmlFor="gem-transfer-amount">
+                <span className="text-xs uppercase tracking-[0.16em] text-textMuted">Amount</span>
+                <input
+                  id="gem-transfer-amount"
+                  inputMode="decimal"
+                  min="0.01"
+                  step="0.01"
+                  value={transferAmount}
+                  onChange={(event) => setTransferAmount(event.target.value)}
+                  placeholder="0.00"
+                  className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold tabular-nums outline-none focus:border-[color:var(--accent)]"
+                />
+                <span className="block text-xs font-normal text-textMuted">Available: {formatAmount(currentUserProfile?.gems ?? 0)}</span>
+              </label>
+              <label className="space-y-1 text-sm font-semibold" htmlFor="gem-transfer-note">
+                <span className="text-xs uppercase tracking-[0.16em] text-textMuted">Note</span>
+                <input
+                  id="gem-transfer-note"
+                  maxLength={160}
+                  value={transferNote}
+                  onChange={(event) => setTransferNote(event.target.value)}
+                  placeholder="Optional"
+                  className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                />
+              </label>
+              <div className="flex items-end gap-2">
+                <Button type="submit" disabled={isTransferringGems || !currentUserProfile} className="h-10">
+                  {isTransferringGems ? "Sending..." : "Transfer"}
+                </Button>
+                <Button type="button" variant="ghost" className="h-10" disabled={isTransferringGems} onClick={() => setIsTransferOpen(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          ) : null}
 
           <div className="grid gap-3 md:grid-cols-[auto_minmax(0,1fr)] md:items-center">
             <div className="flex flex-wrap gap-3 text-sm">

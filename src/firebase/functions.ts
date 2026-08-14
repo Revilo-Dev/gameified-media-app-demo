@@ -14,6 +14,7 @@ export const functionNames = {
   resetAllCrypto: "resetAllCrypto",
   claimDailyReward: "claimDailyReward",
   recordPostView: "recordPostView",
+  transferGems: "transferGems",
 } as const;
 
 export async function checkIpBan() {
@@ -64,4 +65,10 @@ export async function claimDailyReward() {
 export async function recordPostView(postId: string) {
   const callable = httpsCallable<{ postId: string }, { counted: boolean }>(functions, functionNames.recordPostView);
   return (await callable({ postId })).data;
+}
+
+export async function transferGems(recipientUserId: string, amount: number, note?: string) {
+  const callable = httpsCallable<{ recipientUserId: string; amount: number; note?: string }, { ok: boolean; amount: number; recipientUserId: string }>(functions, functionNames.transferGems);
+  const result = await callable({ recipientUserId, amount, note });
+  return result.data;
 }

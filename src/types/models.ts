@@ -161,7 +161,7 @@ export interface Post {
 
 export interface NotificationItem {
   id: string;
-  type: "follow" | "reaction" | "reply" | "badge" | "level" | "reward" | "mention" | "report" | "leaderboard";
+  type: "follow" | "reaction" | "reply" | "badge" | "level" | "reward" | "transfer" | "mention" | "report" | "leaderboard";
   title: string;
   body: string;
   actorId?: string | null;

@@ -155,6 +155,8 @@ function getNotificationVisual(type: NotificationItem["type"]) {
       return { icon: Bell, tint: "text-violet-300", chip: "bg-violet-500/15 text-violet-300", label: "Mention" };
     case "report":
       return { icon: TriangleAlert, tint: "text-[color:var(--error)]", chip: "bg-[color:var(--error)]/15 text-[color:var(--error)]", label: "Report" };
+    case "transfer":
+      return { icon: Gem, tint: "text-cyan-300", chip: "bg-cyan-500/15 text-cyan-300", label: "Transfer" };
     case "level":
     case "reward":
     case "leaderboard":
@@ -2710,7 +2712,7 @@ export function NotificationsPage() {
   }, [user]);
 
   return (
-    <PageFrame title="Notifications" subtitle="Live activity from replies, follows, mentions, rotten tomatoes, reports, and level-ups.">
+    <PageFrame title="Notifications" subtitle="Live activity from replies, follows, mentions, transfers, reports, and level-ups.">
       {!user ? (
         <Card className="p-6 text-sm text-textMuted">Sign in to view your notifications.</Card>
       ) : (
@@ -2775,7 +2777,7 @@ export function NotificationsPage() {
             );
           }) : (
             <div className="rounded-3xl border border-dashed border-border p-8 text-center text-sm text-textMuted">
-              Notifications will appear here as people reply, mention you, follow you, report content, throw rotten tomatoes, or when your account levels up.
+              Notifications will appear here as people reply, mention you, follow you, send gems, report content, throw rotten tomatoes, or when your account levels up.
             </div>
           )}
           </Card>

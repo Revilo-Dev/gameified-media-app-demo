@@ -396,7 +396,7 @@ export const transferGems = onCall(async (request) => {
         createdAt: new Date().toISOString(),
     })
         .set(notificationRef, {
-        type: "reward",
+        type: "transfer",
         title: "Gems received",
         body: `${senderDisplayName} sent you ${amount.toLocaleString()} gems.`,
         actorId: senderId,

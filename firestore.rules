@@ -16,7 +16,16 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.auth.uid == userId;
       allow delete: if isSignedIn() && (request.auth.uid == userId || isModerator());
       allow update: if isSignedIn() && (
-        request.auth.uid == userId ||
+        (
+          request.auth.uid == userId &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            "isPremium",
+            "isPremiumPlus",
+            "premiumTier",
+            "premiumUntil",
+            "premiumApprovedAt"
+          ])
+        ) ||
         (
           isModerator() &&
           request.resource.data.diff(resource.data).changedKeys().hasOnly([
@@ -51,6 +60,11 @@ service cloud.firestore {
           "updatedAt"
         ])
       );
+    }
+
+    match /premiumPayments/{paymentId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isModerator());
+      allow create, update, delete: if false;
     }
 
     match /markets/{marketId} {

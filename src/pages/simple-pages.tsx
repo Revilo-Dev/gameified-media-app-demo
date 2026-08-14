@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Bell, Check, ChevronDown, ChevronUp, CircleDollarSign, Clock3, Crown, Eye, EyeOff, Gem, Globe2, Hammer, ImagePlus, Lock, MapPin, MessageCircle, MoreHorizontal, Orbit, Palette, Search, Send, Sparkles, Star, Trash2, TriangleAlert, Unlock, UserPlus, Users, X, Zap } from "lucide-react";
+import { Bell, Check, ChevronDown, ChevronUp, CircleDollarSign, Clock3, Copy, Crown, Eye, EyeOff, Gem, Globe2, Hammer, ImagePlus, Landmark, Lock, MapPin, MessageCircle, MoreHorizontal, Orbit, Palette, ReceiptText, Search, Send, Sparkles, Star, Trash2, TriangleAlert, Unlock, UserPlus, Users, X, Zap } from "lucide-react";
 import { auth } from "@/firebase/config";
 import { Card } from "@/components/common/card";
 import { Button } from "@/components/common/button";
@@ -32,10 +32,11 @@ import { PROFILE_BORDER_OPTIONS, getProfileBorderStyle } from "@/constants/profi
 import { PROFILE_CARD_OPTIONS, getProfileCardStyle } from "@/constants/profile-cards";
 import { themePresets } from "@/lib/theme-presets";
 import { BADGE_DEFINITIONS, getBadgeRequirement, getBadgeIcon, getBadgeStates } from "@/lib/badges";
-import { banUserAccount, checkIpBan, recordPostView, registerUserDeviceIp, resetAllCrypto, resetAllGems, transferGems } from "@/firebase/functions";
+import { approvePremiumBankTransfer, banUserAccount, checkIpBan, createPremiumBankTransfer, recordPostView, registerUserDeviceIp, resetAllCrypto, resetAllGems, transferGems } from "@/firebase/functions";
 import { hasUnreadConversation, markConversationRead, sendDirectMessage, startConversation, subscribeToAllConversations, subscribeToConversationMessages, subscribeToConversations } from "@/firebase/chat";
 import { createInitialCryptoMarketState, moderateCryptoMarket, subscribeToCryptoMarket, type CryptoMarketState } from "@/firebase/crypto-market";
 import { subscribeToBookmarkedPosts } from "@/firebase/bookmarks";
+import { subscribeToPendingPremiumPayments, subscribeToPremiumPaymentsForUser } from "@/firebase/premium";
 import { markAllNotificationsRead, markNotificationRead, subscribeToNotifications } from "@/firebase/notifications";
 import { TomatoIcon } from "@/components/common/tomato-icon";
 import { SectionNav } from "@/components/common/section-nav";
@@ -44,7 +45,7 @@ import { PostCard } from "@/components/posts/post-card";
 import { PostComposer } from "@/components/posts/post-composer";
 import { formatAmount } from "@/lib/utils";
 import { requestBrowserNotificationPermission, sendBrowserAlert } from "@/lib/browser-alerts";
-import type { Conversation, CryptoCoinId, Message, NotificationItem, Post, ThemeMode, UserProfile } from "@/types/models";
+import type { Conversation, CryptoCoinId, Message, NotificationItem, Post, PremiumPaymentRequest, PremiumTier, ThemeMode, UserProfile } from "@/types/models";
 
 function getFirebaseErrorMessage(error: unknown) {
   if (typeof error !== "object" || error === null) {
@@ -2011,6 +2012,13 @@ function ModeratorTimeoutButton({ targetUserId }: { targetUserId: string }) {
 }
 
 export function PremiumPage() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [payments, setPayments] = useState<PremiumPaymentRequest[]>([]);
+  const [pendingPayments, setPendingPayments] = useState<PremiumPaymentRequest[]>([]);
+  const [creatingTier, setCreatingTier] = useState<PremiumTier | null>(null);
+  const [approvingPaymentId, setApprovingPaymentId] = useState<string | null>(null);
   const perks = [
     { label: "Premium checkmark on profile", premium: true, premiumPlus: true },
     { label: "Badge XP and gem multipliers", premium: true, premiumPlus: true },
@@ -2023,6 +2031,110 @@ export function PremiumPage() {
     { label: "Profile header spotlight", premium: true, premiumPlus: true },
     { label: "Early access to new perks", premium: false, premiumPlus: true },
   ] as const;
+  const pendingPayment = payments.find((payment) => payment.status === "pending") ?? null;
+  const latestPayment = payments[0] ?? null;
+  const activeTierLabel = profile?.isPremiumPlus ? "Premium+" : profile?.isPremium ? "Premium" : "Standard";
+  const premiumUntilLabel = profile?.premiumUntil ? new Date(profile.premiumUntil).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : null;
+
+  useEffect(() => {
+    if (!user) {
+      setProfile(null);
+      setPayments([]);
+      setPendingPayments([]);
+      return;
+    }
+
+    const unsubscribeProfile = subscribeToUserProfileById(user.uid, setProfile);
+    const unsubscribePayments = subscribeToPremiumPaymentsForUser(user.uid, setPayments);
+    return () => {
+      unsubscribeProfile();
+      unsubscribePayments();
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!profile?.isModerator) {
+      setPendingPayments([]);
+      return;
+    }
+
+    return subscribeToPendingPremiumPayments(setPendingPayments);
+  }, [profile?.isModerator]);
+
+  async function requestPremiumTransfer(tier: PremiumTier) {
+    if (!user) {
+      navigate("/login");
+      return;
+    }
+
+    setCreatingTier(tier);
+    try {
+      const payment = await createPremiumBankTransfer(tier);
+      toast.success("Transfer details ready", {
+        description: `Use reference ${payment.transferReference} so the payment can be matched.`,
+      });
+    } catch (error) {
+      console.error("Failed to create premium transfer", error);
+      toast.error(getFirebaseErrorMessage(error));
+    } finally {
+      setCreatingTier(null);
+    }
+  }
+
+  async function copyPaymentText(payment: PremiumPaymentRequest) {
+    const text = [
+      `Amount: $${payment.amountAud} AUD`,
+      `Account name: ${payment.bankAccountName}`,
+      `BSB: ${payment.bankBsb}`,
+      `Account: ${payment.bankAccountNumber}`,
+      `Reference: ${payment.transferReference}`,
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Payment details copied");
+    } catch {
+      toast.error("Could not copy payment details");
+    }
+  }
+
+  async function approvePayment(paymentId: string) {
+    setApprovingPaymentId(paymentId);
+    try {
+      await approvePremiumBankTransfer(paymentId);
+      toast.success("Premium activated");
+    } catch (error) {
+      console.error("Failed to approve premium transfer", error);
+      toast.error(getFirebaseErrorMessage(error));
+    } finally {
+      setApprovingPaymentId(null);
+    }
+  }
+
+  function renderTierCard(tier: PremiumTier, title: string, price: string, description: string, variant: "primary" | "secondary", icon: ReactNode) {
+    const isCreating = creatingTier === tier;
+    const isBlockedByPending = Boolean(pendingPayment);
+    return (
+      <Card className="space-y-4 p-6">
+        <p className={tier === "premiumPlus" ? "text-sm font-semibold uppercase tracking-[0.2em] text-fuchsia-300" : "text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent)]"}>{title}</p>
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h3 className="text-2xl font-bold">{price}</h3>
+            <p className="mt-2 max-w-2xl text-sm text-textMuted">{description}</p>
+          </div>
+          <Button
+            variant={variant}
+            className="w-full gap-2 md:w-auto"
+            disabled={isCreating || isBlockedByPending}
+            onClick={() => void requestPremiumTransfer(tier)}
+          >
+            {icon}
+            {isCreating ? "Preparing..." : isBlockedByPending ? "Payment pending" : `Buy ${title}`}
+          </Button>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <PageFrame title="Premium" subtitle="Compare Premium and Premium+ perks, then choose the tier that fits your play style.">
@@ -2033,39 +2145,86 @@ export function PremiumPage() {
               <Sparkles size={14} />
               Membership
             </div>
-            <h2 className="mt-4 max-w-2xl text-3xl font-bold sm:text-4xl">Subscribe to Premium today!S</h2>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-white/80">Premium gives you all the essentials. Premium+ give you control over status, privacy, and stronger progression boosts and discounts.</p>
-          </div>
-        </Card>
-
-        <Card className="space-y-4 p-6">
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent)]">Premium</p>
-          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div>
-              <h3 className="text-2xl font-bold">$1 / month</h3>
-              <p className="mt-2 max-w-2xl text-sm text-textMuted">Best for cosmetics, rewards, and progress boosts.</p>
-            </div>
-            <Button className="w-full gap-2 md:w-auto">
+            <h2 className="mt-4 max-w-2xl text-3xl font-bold sm:text-4xl">Subscribe to Premium today</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-white/80">Premium gives you all the essentials. Premium+ gives you control over status, privacy, stronger progression boosts, and discounts.</p>
+            <div className="mt-6 inline-flex flex-wrap items-center gap-3 rounded-2xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white/85">
               <Crown size={16} />
-              Buy Premium
-            </Button>
+              <span>Current tier: <strong>{activeTierLabel}</strong>{premiumUntilLabel ? ` until ${premiumUntilLabel}` : ""}</span>
+            </div>
           </div>
         </Card>
 
-        <Card className="space-y-4 p-6">
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-fuchsia-300">Premium+</p>
-          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div>
-              <h3 className="text-2xl font-bold">$5 / month</h3>
-              <p className="mt-2 max-w-2xl text-sm text-textMuted">Best for privacy, premium status, and faster badge growth.</p>
+        {renderTierCard("premium", "Premium", "$1 AUD / month", "Best for cosmetics, rewards, and progress boosts.", "primary", <Crown size={16} />)}
+        {renderTierCard("premiumPlus", "Premium+", "$5 AUD / month", "Best for privacy, premium status, and faster badge growth.", "secondary", <Sparkles size={16} />)}
+
+        {pendingPayment ? (
+          <Card className="space-y-5 p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent)]">Bank transfer pending</p>
+                <h3 className="mt-2 text-2xl font-bold">Pay ${pendingPayment.amountAud} AUD for {pendingPayment.tier === "premiumPlus" ? "Premium+" : "Premium"}</h3>
+                <p className="mt-2 max-w-2xl text-sm text-textMuted">Transfer the exact amount using the reference below. A moderator can activate premium once the deposit appears in the bank account.</p>
+              </div>
+              <Button variant="secondary" className="gap-2" onClick={() => void copyPaymentText(pendingPayment)}>
+                <Copy size={16} />
+                Copy
+              </Button>
             </div>
-            <Button variant="secondary" className="w-full gap-2 md:w-auto">
-              <Sparkles size={16} />
-              Buy Premium+
-            </Button>
+            <div className="grid gap-3 md:grid-cols-2">
+              {[
+                ["Account name", pendingPayment.bankAccountName],
+                ["BSB", pendingPayment.bankBsb],
+                ["Account number", pendingPayment.bankAccountNumber],
+                ["Reference", pendingPayment.transferReference],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-2xl border border-border bg-surfaceAlt/25 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-textMuted">{label}</p>
+                  <p className="mt-1 break-words text-lg font-semibold">{value}</p>
+                </div>
+              ))}
+            </div>
+          </Card>
+        ) : latestPayment?.status === "approved" ? (
+          <Card className="flex flex-col gap-3 p-6 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">Payment approved</p>
+              <p className="mt-2 text-sm text-textMuted">Your last premium payment has been approved.</p>
+            </div>
+            <Check size={24} className="text-emerald-300" />
+          </Card>
+        ) : null}
+      </div>
+
+      {profile?.isModerator ? (
+        <Card className="space-y-5 p-6">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[color:var(--accent)]">Moderator approvals</p>
+              <h3 className="mt-2 text-2xl font-bold">Pending premium transfers</h3>
+            </div>
+            <p className="text-sm text-textMuted">{pendingPayments.length} waiting</p>
+          </div>
+          <div className="space-y-3">
+            {pendingPayments.length ? pendingPayments.map((payment) => (
+              <div key={payment.id} className="flex flex-col gap-4 rounded-2xl border border-border bg-surfaceAlt/25 p-4 md:flex-row md:items-center md:justify-between">
+                <div className="min-w-0">
+                  <p className="font-semibold">{payment.userDisplayName} @{payment.userHandle}</p>
+                  <p className="mt-1 text-sm text-textMuted">${payment.amountAud} AUD · {payment.tier === "premiumPlus" ? "Premium+" : "Premium"} · {payment.transferReference}</p>
+                </div>
+                <Button className="gap-2" disabled={approvingPaymentId === payment.id} onClick={() => void approvePayment(payment.id)}>
+                  <ReceiptText size={16} />
+                  {approvingPaymentId === payment.id ? "Approving..." : "Approve"}
+                </Button>
+              </div>
+            )) : (
+              <div className="flex items-center gap-3 rounded-2xl border border-border bg-surfaceAlt/25 p-4 text-sm text-textMuted">
+                <Landmark size={16} />
+                No pending bank transfers.
+              </div>
+            )}
           </div>
         </Card>
-      </div>
+      ) : null}
 
       <Card className="space-y-5 p-6">
         <div className="flex flex-wrap items-end justify-between gap-3">

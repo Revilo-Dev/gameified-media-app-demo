@@ -9,6 +9,15 @@ const db = getFirestore();
 const auth = getAuth();
 const storage = getStorage();
 const MAX_GEM_TRANSFER = 1_000_000;
+const PREMIUM_BANK_ACCOUNT = {
+    accountName: "Lucas Pinnell",
+    bsb: "814282",
+    accountNumber: "52255513",
+};
+const PREMIUM_TIERS = {
+    premium: { amountAud: 1, months: 1 },
+    premiumPlus: { amountAud: 5, months: 1 },
+};
 function normalizeGemAmount(value, minimum = 0) {
     const numericValue = Number(value);
     return Number(Math.max(minimum, Number.isFinite(numericValue) ? numericValue : minimum).toFixed(2));
@@ -20,6 +29,14 @@ function getRequesterIp(request) {
 }
 function ipHash(ip) {
     return createHash("sha256").update(ip).digest("hex");
+}
+function normalizePremiumTier(value) {
+    return value === "premiumPlus" ? "premiumPlus" : value === "premium" ? "premium" : null;
+}
+function createTransferReference(uid) {
+    const userPart = uid.replace(/[^a-z0-9]/gi, "").slice(0, 6).toUpperCase() || "USER";
+    const timePart = Date.now().toString(36).toUpperCase();
+    return `PREM-${userPart}-${timePart}`;
 }
 async function isRequesterIpBanned(request) {
     const ip = getRequesterIp(request);
@@ -407,6 +424,135 @@ export const transferGems = onCall(async (request) => {
     })
         .commit();
     return { ok: true, amount, recipientUserId: recipientId };
+});
+export const createPremiumBankTransfer = onCall(async (request) => {
+    if (!request.auth?.uid) {
+        throw new HttpsError("unauthenticated", "You must be signed in.");
+    }
+    const tier = normalizePremiumTier(request.data?.tier);
+    if (!tier) {
+        throw new HttpsError("invalid-argument", "Choose Premium or Premium+.");
+    }
+    const userRef = db.collection("users").doc(request.auth.uid);
+    const pendingSnapshot = await db.collection("premiumPayments")
+        .where("userId", "==", request.auth.uid)
+        .limit(20)
+        .get();
+    const pendingPayment = pendingSnapshot.docs.find((payment) => payment.get("status") === "pending");
+    if (pendingPayment) {
+        const pending = pendingPayment;
+        return {
+            ok: true,
+            paymentId: pending.id,
+            tier: pending.get("tier"),
+            amountAud: Number(pending.get("amountAud") ?? PREMIUM_TIERS[tier].amountAud),
+            months: Number(pending.get("months") ?? PREMIUM_TIERS[tier].months),
+            transferReference: String(pending.get("transferReference") ?? ""),
+            bankAccountName: String(pending.get("bankAccountName") ?? PREMIUM_BANK_ACCOUNT.accountName),
+            bankBsb: String(pending.get("bankBsb") ?? PREMIUM_BANK_ACCOUNT.bsb),
+            bankAccountNumber: String(pending.get("bankAccountNumber") ?? PREMIUM_BANK_ACCOUNT.accountNumber),
+        };
+    }
+    const userSnapshot = await userRef.get();
+    if (!userSnapshot.exists) {
+        throw new HttpsError("not-found", "Your profile is missing.");
+    }
+    const tierConfig = PREMIUM_TIERS[tier];
+    const paymentRef = db.collection("premiumPayments").doc();
+    const transferReference = createTransferReference(request.auth.uid);
+    await paymentRef.set({
+        userId: request.auth.uid,
+        userDisplayName: String(userSnapshot.get("displayName") ?? "User"),
+        userHandle: String(userSnapshot.get("handle") ?? ""),
+        userEmail: String(userSnapshot.get("email") ?? ""),
+        tier,
+        amountAud: tierConfig.amountAud,
+        months: tierConfig.months,
+        status: "pending",
+        transferReference,
+        bankAccountName: PREMIUM_BANK_ACCOUNT.accountName,
+        bankBsb: PREMIUM_BANK_ACCOUNT.bsb,
+        bankAccountNumber: PREMIUM_BANK_ACCOUNT.accountNumber,
+        createdAtMs: Date.now(),
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+    });
+    return {
+        ok: true,
+        paymentId: paymentRef.id,
+        tier,
+        amountAud: tierConfig.amountAud,
+        months: tierConfig.months,
+        transferReference,
+        bankAccountName: PREMIUM_BANK_ACCOUNT.accountName,
+        bankBsb: PREMIUM_BANK_ACCOUNT.bsb,
+        bankAccountNumber: PREMIUM_BANK_ACCOUNT.accountNumber,
+    };
+});
+export const approvePremiumBankTransfer = onCall(async (request) => {
+    if (!request.auth?.uid) {
+        throw new HttpsError("unauthenticated", "You must be signed in.");
+    }
+    await assertModerator(request.auth.uid);
+    const paymentId = typeof request.data?.paymentId === "string" ? request.data.paymentId.trim() : "";
+    if (!paymentId) {
+        throw new HttpsError("invalid-argument", "A payment ID is required.");
+    }
+    const paymentRef = db.collection("premiumPayments").doc(paymentId);
+    let userId = "";
+    let approvedTier = null;
+    let premiumUntil = "";
+    await db.runTransaction(async (transaction) => {
+        const paymentSnapshot = await transaction.get(paymentRef);
+        if (!paymentSnapshot.exists) {
+            throw new HttpsError("not-found", "Payment request not found.");
+        }
+        if (paymentSnapshot.get("status") !== "pending") {
+            throw new HttpsError("failed-precondition", "This payment request is already settled.");
+        }
+        const normalizedTier = normalizePremiumTier(paymentSnapshot.get("tier"));
+        if (!normalizedTier) {
+            throw new HttpsError("failed-precondition", "Payment request has an invalid tier.");
+        }
+        userId = String(paymentSnapshot.get("userId") ?? "");
+        if (!userId) {
+            throw new HttpsError("failed-precondition", "Payment request is missing a user.");
+        }
+        approvedTier = normalizedTier;
+        const now = new Date();
+        const expiresAt = new Date(now);
+        expiresAt.setMonth(expiresAt.getMonth() + Number(paymentSnapshot.get("months") ?? 1));
+        premiumUntil = expiresAt.toISOString();
+        transaction.update(paymentRef, {
+            status: "approved",
+            approvedAt: now.toISOString(),
+            approvedBy: request.auth.uid,
+            updatedAt: FieldValue.serverTimestamp(),
+        });
+        transaction.update(db.collection("users").doc(userId), {
+            isPremium: true,
+            isPremiumPlus: normalizedTier === "premiumPlus",
+            premiumTier: normalizedTier,
+            premiumUntil,
+            premiumApprovedAt: now.toISOString(),
+            updatedAt: FieldValue.serverTimestamp(),
+        });
+    });
+    if (!approvedTier) {
+        throw new HttpsError("internal", "Premium approval did not complete.");
+    }
+    const approvedTierLabel = approvedTier === "premiumPlus" ? "Premium+" : "Premium";
+    await db.collection("notifications").doc().set({
+        type: "reward",
+        title: `${approvedTierLabel} activated`,
+        body: `Your ${approvedTierLabel} membership is active until ${new Date(premiumUntil).toLocaleDateString("en-AU")}.`,
+        actorId: request.auth.uid,
+        userId,
+        postId: null,
+        read: false,
+        createdAt: FieldValue.serverTimestamp(),
+    });
+    return { ok: true, userId, tier: approvedTier, premiumUntil };
 });
 export const claimDailyReward = onCall(async (request) => {
     if (!request.auth?.uid) {

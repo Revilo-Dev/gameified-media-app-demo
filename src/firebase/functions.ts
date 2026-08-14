@@ -15,6 +15,8 @@ export const functionNames = {
   claimDailyReward: "claimDailyReward",
   recordPostView: "recordPostView",
   transferGems: "transferGems",
+  createPremiumBankTransfer: "createPremiumBankTransfer",
+  approvePremiumBankTransfer: "approvePremiumBankTransfer",
 } as const;
 
 export async function checkIpBan() {
@@ -71,4 +73,24 @@ export async function transferGems(recipientUserId: string, amount: number, note
   const callable = httpsCallable<{ recipientUserId: string; amount: number; note?: string }, { ok: boolean; amount: number; recipientUserId: string }>(functions, functionNames.transferGems);
   const result = await callable({ recipientUserId, amount, note });
   return result.data;
+}
+
+export async function createPremiumBankTransfer(tier: "premium" | "premiumPlus") {
+  const callable = httpsCallable<{ tier: "premium" | "premiumPlus" }, {
+    ok: boolean;
+    paymentId: string;
+    tier: "premium" | "premiumPlus";
+    amountAud: number;
+    months: number;
+    transferReference: string;
+    bankAccountName: string;
+    bankBsb: string;
+    bankAccountNumber: string;
+  }>(functions, functionNames.createPremiumBankTransfer);
+  return (await callable({ tier })).data;
+}
+
+export async function approvePremiumBankTransfer(paymentId: string) {
+  const callable = httpsCallable<{ paymentId: string }, { ok: boolean; userId: string; tier: "premium" | "premiumPlus"; premiumUntil: string }>(functions, functionNames.approvePremiumBankTransfer);
+  return (await callable({ paymentId })).data;
 }

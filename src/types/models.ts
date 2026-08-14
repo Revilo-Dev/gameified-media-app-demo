@@ -83,6 +83,9 @@ export interface UserProfile {
   badgeProgress?: Record<string, BadgeProgressEntry>;
   isPremium: boolean;
   isPremiumPlus?: boolean;
+  premiumTier?: PremiumTier | null;
+  premiumUntil?: string | null;
+  premiumApprovedAt?: string | null;
   isModerator: boolean;
   isVerified: boolean;
   isPrivate: boolean;
@@ -122,6 +125,28 @@ export interface UserProfile {
   dailyWheelSpinDate?: string | null;
   dailyWheelSpinsUsed?: number;
   notificationPreferences?: Record<"replies" | "mentions" | "follows" | "reactions" | "rewards" | "reports", boolean>;
+}
+
+export type PremiumTier = "premium" | "premiumPlus";
+export type PremiumPaymentStatus = "pending" | "approved" | "rejected";
+
+export interface PremiumPaymentRequest {
+  id: string;
+  userId: string;
+  userDisplayName: string;
+  userHandle: string;
+  userEmail: string;
+  tier: PremiumTier;
+  amountAud: number;
+  months: number;
+  status: PremiumPaymentStatus;
+  transferReference: string;
+  bankAccountName: string;
+  bankBsb: string;
+  bankAccountNumber: string;
+  createdAtMs: number;
+  approvedAt?: string | null;
+  approvedBy?: string | null;
 }
 
 export interface Post {

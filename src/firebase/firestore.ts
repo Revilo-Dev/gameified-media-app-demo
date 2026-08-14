@@ -13,4 +13,5 @@ export const COLLECTIONS = {
   xpTransactions: "xpTransactions",
   activityHistory: "activityHistory",
   postViews: "postViews",
+  premiumPayments: "premiumPayments",
 } as const;
